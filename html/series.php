@@ -4,19 +4,18 @@ require_once 'includes/header.php';
 
 // Leer desde la caché de la BD (instantáneo)
 $series = $pdo->query("
-    SELECT * FROM media_cache s
-    WHERE s.type='series'
-      AND EXISTS (
-          SELECT 1 FROM media_cache e
-          WHERE e.series_id = s.id AND e.type='episode' AND e.has_file=1
-      )
+    SELECT s.* FROM series s
+    WHERE EXISTS (
+        SELECT 1 FROM episodes e
+        WHERE e.series_id = s.id AND e.has_file=1
+    )
     ORDER BY s.title ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 $cacheEmpty = empty($series);
 
 // Última actualización del caché
 $lastUpdate = $pdo->query("
-    SELECT MAX(updated_at) FROM media_cache WHERE type='series'
+    SELECT MAX(updated_at) FROM series
 ")->fetchColumn();
 ?>
 

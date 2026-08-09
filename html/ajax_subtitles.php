@@ -23,8 +23,12 @@ if (!$epId) {
 }
 
 try {
-    // Obtener el medio desde la caché para conocer sus rutas
-    $row = $pdo->prepare("SELECT * FROM media_cache WHERE id = ?");
+    // Obtener el medio desde la BD para conocer sus rutas
+    if ($type === 'movies' || $type === 'movie') {
+        $row = $pdo->prepare("SELECT * FROM movies WHERE id = ?");
+    } else {
+        $row = $pdo->prepare("SELECT * FROM episodes WHERE id = ?");
+    }
     $row->execute([$epId]);
     $media = $row->fetch(PDO::FETCH_ASSOC);
 

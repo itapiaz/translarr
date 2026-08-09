@@ -104,32 +104,29 @@ try {
         $mediaTitle = '';
         $season = 0;
         $episode = 0;
-        $stmt = $pdo->prepare("SELECT title, season, episode, series_id FROM media_cache WHERE id = ?");
-        $stmt->execute([$media_id]);
-        $mediaRow = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($mediaRow) {
-            $mediaTitle = $mediaRow['title'] ?? '';
-            $season = (int)($mediaRow['season'] ?? 0);
-            $episode = (int)($mediaRow['episode'] ?? 0);
+        $isMovie = ($type === 'movies' || $type === 'movie');
+        if ($isMovie) {
+            $stmt = $pdo->prepare("SELECT title FROM movies WHERE id = ?");
+            $stmt->execute([$media_id]);
+            $mediaRow = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($mediaRow) $mediaTitle = $mediaRow['title'] ?? '';
+        } else {
+            $stmt = $pdo->prepare("SELECT title, season, episode, series_id FROM episodes WHERE id = ?");
+            $stmt->execute([$media_id]);
+            $mediaRow = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($mediaRow) {
+                $mediaTitle = $mediaRow['title'] ?? '';
+                $season = (int)($mediaRow['season'] ?? 0);
+                $episode = (int)($mediaRow['episode'] ?? 0);
+            }
         }
 
         // Si es episodio, usar el título de la serie en vez del título del episodio
-        if ($type === 'episode' && !empty($series_id)) {
-            // Buscar la serie entre los episodios que tengan este series_id
-            $stmtS = $pdo->prepare("SELECT title FROM media_cache WHERE id = (SELECT series_id FROM media_cache WHERE id = ? AND type='episode') AND type='series' LIMIT 1");
-            $stmtS->execute([$media_id]);
-            $seriesRow = $stmtS->fetch(PDO::FETCH_ASSOC);
-            if ($seriesRow && !empty($seriesRow['title'])) {
-                $mediaTitle = $seriesRow['title'];
-            } else {
-                // Fallback: buscar por series_id directamente
-                $stmtS2 = $pdo->prepare("SELECT title FROM media_cache WHERE id = ? AND type='series'");
-                $stmtS2->execute([$series_id]);
-                $seriesRow2 = $stmtS2->fetch(PDO::FETCH_ASSOC);
-                if ($seriesRow2 && !empty($seriesRow2['title'])) {
-                    $mediaTitle = $seriesRow2['title'];
-                }
-            }
+        if (!$isMovie && !empty($series_id)) {
+            $stmtS = $pdo->prepare("SELECT title FROM series WHERE id = ?");
+            $stmtS->execute([$series_id]);
+            $seriesTitle = $stmtS->fetchColumn();
+            if ($seriesTitle) $mediaTitle = $seriesTitle;
         }
 
         // Construir etiqueta descriptiva para el panel de tareas

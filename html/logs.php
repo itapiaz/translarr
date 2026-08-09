@@ -43,7 +43,7 @@ try {
     // Corregir media_title para episodios: buscar título de la serie
     foreach ($translationLogs as &$tl) {
         if (($tl['media_type'] === 'episode' || $tl['media_type'] === 'series') && !empty($tl['media_id'])) {
-            $st = $pdo->prepare("SELECT mc2.title FROM media_cache mc1 JOIN media_cache mc2 ON mc1.series_id = mc2.id WHERE mc1.id = ? AND mc2.type='series'");
+            $st = $pdo->prepare("SELECT s.title FROM episodes e JOIN series s ON s.id=e.series_id WHERE e.id = ?");
             $st->execute([$tl['media_id']]);
             $sr = $st->fetch(PDO::FETCH_ASSOC);
             if ($sr && !empty($sr['title'])) {

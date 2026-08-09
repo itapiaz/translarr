@@ -49,7 +49,7 @@ switch ($action) {
 
                     // Intentar obtener el título de la serie desde la BD
                     if (!empty($seriesId)) {
-                        $st = $pdo->prepare("SELECT title FROM media_cache WHERE id = ? AND type='series'");
+                        $st = $pdo->prepare("SELECT title FROM series WHERE id = ?");
                         $st->execute([$seriesId]);
                         $sr = $st->fetch(PDO::FETCH_ASSOC);
                         if ($sr && !empty($sr['title'])) {
@@ -58,7 +58,7 @@ switch ($action) {
                     }
                     // Fallback: si no se encontró serie pero es episodio, intentar desde el series_id del episodio
                     if (empty($label) && !empty($mediaId)) {
-                        $st2 = $pdo->prepare("SELECT mc2.title FROM media_cache mc1 JOIN media_cache mc2 ON mc1.series_id = mc2.id WHERE mc1.id = ? AND mc2.type='series'");
+                        $st2 = $pdo->prepare("SELECT s.title FROM episodes e JOIN series s ON s.id=e.series_id WHERE e.id = ?");
                         $st2->execute([$mediaId]);
                         $sr2 = $st2->fetch(PDO::FETCH_ASSOC);
                         if ($sr2 && !empty($sr2['title'])) {
@@ -141,7 +141,7 @@ switch ($action) {
         // Corregir media_title para episodios: buscar el título de la serie
         foreach ($logs as &$log) {
             if ($log['media_type'] === 'episode' && !empty($log['media_id'])) {
-                $st = $pdo->prepare("SELECT mc2.title FROM media_cache mc1 JOIN media_cache mc2 ON mc1.series_id = mc2.id WHERE mc1.id = ? AND mc2.type='series'");
+                $st = $pdo->prepare("SELECT s.title FROM episodes e JOIN series s ON s.id=e.series_id WHERE e.id = ?");
                 $st->execute([$log['media_id']]);
                 $sr = $st->fetch(PDO::FETCH_ASSOC);
                 if ($sr && !empty($sr['title'])) {

@@ -24,8 +24,8 @@ try {
     // Leer episodios faltantes desde media_cache (instantáneo, sin API ni disco)
     $stmt = $pdo->prepare("
         SELECT id, title, season, episode
-        FROM media_cache
-        WHERE series_id = ? AND type = 'episode' AND has_file = 1 AND has_spanish = 0
+        FROM episodes
+        WHERE series_id = ? AND has_file = 1 AND has_spanish = 0
         ORDER BY season ASC, episode ASC
     ");
     $stmt->execute([$seriesId]);

@@ -25,12 +25,12 @@ if (empty($seriesId)) {
 
 try {
     // Obtener título de la serie
-    $stmtS = $pdo->prepare("SELECT title FROM media_cache WHERE id = ? AND type='series'");
+    $stmtS = $pdo->prepare("SELECT title FROM series WHERE id = ?");
     $stmtS->execute([$seriesId]);
     $seriesTitle = $stmtS->fetchColumn() ?: '';
 
-    // Obtener todos los episodios de la serie desde la caché
-    $epsStmt = $pdo->prepare("SELECT * FROM media_cache WHERE series_id = ? AND type='episode' AND has_file=1 ORDER BY season ASC, episode ASC");
+    // Obtener todos los episodios de la serie desde la BD
+    $epsStmt = $pdo->prepare("SELECT * FROM episodes WHERE series_id = ? AND has_file=1 ORDER BY season ASC, episode ASC");
     $epsStmt->execute([$seriesId]);
     $episodes = $epsStmt->fetchAll(PDO::FETCH_ASSOC);
 

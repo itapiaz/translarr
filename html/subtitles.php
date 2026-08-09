@@ -19,16 +19,16 @@ $mediaTitle = 'Detalles de Subtítulos';
 
 if ($type === 'series') {
     // Datos completos de la serie
-    $row = $pdo->prepare("SELECT * FROM media_cache WHERE id=? AND type='series'");
+    $row = $pdo->prepare("SELECT * FROM series WHERE id=?");
     $row->execute([$id]);
     $seriesRow = $row->fetch(PDO::FETCH_ASSOC);
     if ($seriesRow) $mediaTitle = $seriesRow['title'];
 
     // Todos los episodios agrupados por temporada
     $stmt = $pdo->prepare("
-        SELECT id, title, season, episode, has_spanish, subtitle_path, subtitle_lang
-        FROM media_cache
-        WHERE series_id=? AND type='episode' AND has_file=1
+        SELECT id, title, season, episode, has_spanish
+        FROM episodes
+        WHERE series_id=? AND has_file=1
         ORDER BY season ASC, episode ASC
     ");
     $stmt->execute([$id]);
@@ -42,7 +42,7 @@ if ($type === 'series') {
 
 } else {
     // Película: obtener de caché
-    $row = $pdo->prepare("SELECT * FROM media_cache WHERE id=? AND type='movie'");
+    $row = $pdo->prepare("SELECT * FROM movies WHERE id=?");
     $row->execute([$id]);
     $movieRow = $row->fetch(PDO::FETCH_ASSOC);
     if ($movieRow) $mediaTitle = $movieRow['title'];

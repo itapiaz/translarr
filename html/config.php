@@ -54,60 +54,49 @@ try {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS media_cache (
-        id TEXT PRIMARY KEY, type TEXT NOT NULL, series_id TEXT,
-        title TEXT NOT NULL, year TEXT, poster_url TEXT,
-        has_spanish INTEGER DEFAULT 0,
+    // Catálogo separado por entidad: movies / series / episodes
+    $pdo->exec("CREATE TABLE IF NOT EXISTS movies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        radarr_id INTEGER UNIQUE NOT NULL,
+        tmdb_id INTEGER,
+        title TEXT NOT NULL,
+        year TEXT,
+        overview TEXT,
+        poster_url TEXT,
+        folder_path TEXT,
+        video_path TEXT,
         has_file INTEGER DEFAULT 0,
-        subtitle_path TEXT, subtitle_lang TEXT,
-        season INTEGER DEFAULT 0, episode INTEGER DEFAULT 0,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        sonarr_series_id TEXT, sonarr_episode_id TEXT, tvdb_id TEXT,
-        radarr_id TEXT, tmdb_id TEXT, video_path TEXT
+        has_spanish INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
-
+    $pdo->exec("CREATE TABLE IF NOT EXISTS series (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sonarr_series_id INTEGER UNIQUE NOT NULL,
+        tvdb_id INTEGER,
+        title TEXT NOT NULL,
+        year TEXT,
+        overview TEXT,
+        poster_url TEXT,
+        folder_path TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS episodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        series_id INTEGER NOT NULL REFERENCES series(id),
+        sonarr_episode_id INTEGER UNIQUE NOT NULL,
+        tvdb_episode_id INTEGER,
+        title TEXT,
+        season INTEGER DEFAULT 0,
+        episode INTEGER DEFAULT 0,
+        video_path TEXT,
+        has_file INTEGER DEFAULT 0,
+        has_spanish INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
     try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN season INTEGER DEFAULT 0");
-    } catch (PDOException $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN episode INTEGER DEFAULT 0");
-    } catch (PDOException $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN overview TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN folder_path TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN sonarr_series_id TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN sonarr_episode_id TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN tvdb_id TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN radarr_id TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN tmdb_id TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN video_path TEXT");
-    } catch (Exception $e) {
-    }
-    try {
-        $pdo->exec("ALTER TABLE media_cache ADD COLUMN has_file INTEGER DEFAULT 0");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_movies_has_file ON movies(has_file)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_episodes_series ON episodes(series_id)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_episodes_series_hasfile ON episodes(series_id, has_file)");
     } catch (Exception $e) {
     }
 

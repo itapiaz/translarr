@@ -21,6 +21,10 @@ require_once __DIR__ . '/includes/ArrFactory.php';
 require_once __DIR__ . '/includes/SubtitleScanner.php';
 require_once __DIR__ . '/includes/security.php';
 
+// La conexión global abierta por config.php no se usa en el worker;
+// cerrarla evita que retenga bloqueos sobre la BD durante el bucle.
+$pdo = null;
+
 $lastScanTime = 0;
 $triggerFile = '/config/scan_trigger.now';
 
@@ -30,7 +34,7 @@ function freshPDO(): PDO {
     global $dbPath;
     $pdo = new PDO("sqlite:" . $dbPath);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec("PRAGMA busy_timeout=5000;");
+    $pdo->exec("PRAGMA busy_timeout=30000;");
     return $pdo;
 }
 
@@ -45,15 +49,6 @@ $_migrations = [
     "ALTER TABLE background_tasks ADD COLUMN payload TEXT",
     "ALTER TABLE background_tasks ADD COLUMN result TEXT",
     "ALTER TABLE translation_log ADD COLUMN started_at DATETIME",
-    "ALTER TABLE media_cache ADD COLUMN overview TEXT",
-    "ALTER TABLE media_cache ADD COLUMN folder_path TEXT",
-    "ALTER TABLE media_cache ADD COLUMN sonarr_series_id TEXT",
-    "ALTER TABLE media_cache ADD COLUMN sonarr_episode_id TEXT",
-    "ALTER TABLE media_cache ADD COLUMN tvdb_id TEXT",
-    "ALTER TABLE media_cache ADD COLUMN radarr_id TEXT",
-    "ALTER TABLE media_cache ADD COLUMN tmdb_id TEXT",
-    "ALTER TABLE media_cache ADD COLUMN video_path TEXT",
-    "ALTER TABLE media_cache ADD COLUMN has_file INTEGER DEFAULT 0",
 ];
 foreach ($_migrations as $_sql) {
     try { $_migPdo->exec($_sql); } catch (Exception $_e) { /* columna ya existe, ignorar */ }
@@ -65,17 +60,22 @@ unset($_migrations, $_sql, $_e);
 
 function doScanMedia(): string {
     workerLog("=== Escaneando (Sonarr/Radarr) ===");
-    $pdo = freshPDO();
-
-    // Recargar config desde BD (por si cambió entre ciclos)
-    $stmt = $pdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('sonarr_url','sonarr_api_key','sonarr_enabled','radarr_url','radarr_api_key','radarr_enabled')");
-    $cfg = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-
     $stats = ['movies' => 0, 'series' => 0, 'episodes' => 0];
     $scanned = ['movies' => false, 'series' => false, 'episodes' => false];
-    $scanTime = $pdo->query("SELECT datetime('now')")->fetchColumn();
 
-    // ==================== SONARR (series y episodios) ====================
+    // Leer config
+    $cfgPdo = freshPDO();
+    $stmt = $cfgPdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('sonarr_url','sonarr_api_key','sonarr_enabled','radarr_url','radarr_api_key','radarr_enabled')");
+    $cfg = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    $scanTime = $cfgPdo->query("SELECT datetime('now')")->fetchColumn();
+    $cfgPdo = null;
+
+    // Vaciar el WAL antes del escaneo para evitar checkpoints intermedios
+    $ck = freshPDO();
+    @$ck->exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    $ck = null;
+
+    // ==================== SONARR ====================
     $sonarrEnabled = (($cfg['sonarr_enabled'] ?? '0') === '1')
         || (($cfg['sonarr_url'] ?? '') !== '' && ($cfg['sonarr_api_key'] ?? '') !== '');
     if (!$sonarrEnabled) {
@@ -85,21 +85,28 @@ function doScanMedia(): string {
             $sonarrKey = $cfg['sonarr_api_key'] ?? '';
             if (isEncrypted($sonarrKey)) $sonarrKey = decryptValue($sonarrKey);
             $sonarr = ArrFactory::sonarr($cfg['sonarr_url'] ?? '', $sonarrKey);
-
             $seriesList = $sonarr->getSeries();
 
-            $upsertSeries = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,tvdb_id,sonarr_series_id,poster_url,overview,folder_path,updated_at) VALUES(?,'series',?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,tvdb_id=excluded.tvdb_id,sonarr_series_id=excluded.sonarr_series_id,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,updated_at=CURRENT_TIMESTAMP");
-
-            $pdo->beginTransaction();
+            // Upsert de series (autocommit)
+            $pdo = freshPDO();
+            $upsertSeries = $pdo->prepare("INSERT INTO series (sonarr_series_id, tvdb_id, title, year, overview, poster_url, folder_path, updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(sonarr_series_id) DO UPDATE SET tvdb_id=excluded.tvdb_id,title=excluded.title,year=excluded.year,overview=excluded.overview,poster_url=excluded.poster_url,folder_path=excluded.folder_path,updated_at=CURRENT_TIMESTAMP");
+            $getSeriesId = $pdo->prepare("SELECT id FROM series WHERE sonarr_series_id=?");
+            $seriesIdMap = [];
             foreach ($seriesList as $s) {
-                $upsertSeries->execute(['series:' . $s['id'], $s['title'], $s['year'], $s['tvdbId'], $s['id'], $s['poster'], $s['overview'], $s['path']]);
+                $upsertSeries->execute([(int)$s['id'], $s['tvdbId'] !== '' ? (int)$s['tvdbId'] : null, $s['title'], $s['year'], $s['overview'], $s['poster'], $s['path']]);
+                $getSeriesId->execute([(int)$s['id']]);
+                $seriesIdMap[$s['id']] = (int)$getSeriesId->fetchColumn();
                 $stats['series']++;
             }
-            $pdo->commit();
+            $pdo = null;
             $scanned['series'] = true;
 
-            $upsertEp = $pdo->prepare("INSERT INTO media_cache(id,type,series_id,title,season,episode,tvdb_id,sonarr_series_id,sonarr_episode_id,video_path,folder_path,has_spanish,has_file,updated_at) VALUES(?,'episode',?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET series_id=excluded.series_id,title=excluded.title,season=excluded.season,episode=excluded.episode,tvdb_id=excluded.tvdb_id,sonarr_series_id=excluded.sonarr_series_id,sonarr_episode_id=excluded.sonarr_episode_id,video_path=excluded.video_path,folder_path=excluded.folder_path,has_spanish=excluded.has_spanish,has_file=excluded.has_file,updated_at=CURRENT_TIMESTAMP");
+            // Upsert de episodios (autocommit)
+            $pdo = freshPDO();
+            $upsertEp = $pdo->prepare("INSERT INTO episodes (series_id, sonarr_episode_id, tvdb_episode_id, title, season, episode, video_path, has_file, has_spanish, updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(sonarr_episode_id) DO UPDATE SET series_id=excluded.series_id,title=excluded.title,season=excluded.season,episode=excluded.episode,tvdb_episode_id=excluded.tvdb_episode_id,video_path=excluded.video_path,has_file=excluded.has_file,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
             foreach ($seriesList as $s) {
+                $seriesDbId = $seriesIdMap[$s['id']] ?? null;
+                if (!$seriesDbId) continue;
                 try {
                     $eps = $sonarr->getEpisodes($s['id']);
                     $files = $sonarr->getEpisodeFiles($s['id']);
@@ -111,30 +118,28 @@ function doScanMedia(): string {
                         }
                         if ($p !== '') $fileById[$f['id']] = $p;
                     }
-                    $pdo->beginTransaction();
                     foreach ($eps as $ep) {
                         $videoPath = isset($fileById[$ep['episodeFileId']]) ? $fileById[$ep['episodeFileId']] : '';
                         $hasSpanish = 0;
                         if ($videoPath && is_file($videoPath)) {
                             $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
                         }
-                        $upsertEp->execute(['episode:' . $ep['id'], 'series:' . $s['id'], $ep['title'], (int)$ep['season'], (int)$ep['episode'], $ep['tvdbEpisodeId'], $s['id'], $ep['id'], $videoPath, $s['path'], $hasSpanish, $ep['hasFile'] ? 1 : 0]);
+                        $upsertEp->execute([$seriesDbId, (int)$ep['id'], $ep['tvdbEpisodeId'] !== '' ? (int)$ep['tvdbEpisodeId'] : null, $ep['title'], (int)$ep['season'], (int)$ep['episode'], $videoPath, $ep['hasFile'] ? 1 : 0, $hasSpanish]);
                         $stats['episodes']++;
                     }
-                    $pdo->commit();
                     $scanned['episodes'] = true;
                 } catch (Exception $e) {
-                    if ($pdo->inTransaction()) $pdo->rollBack();
                     workerLog("  Error eps {$s['title']}: " . $e->getMessage());
                 }
             }
+            $pdo = null;
             workerLog("Sonarr: {$stats['series']} series, {$stats['episodes']} episodios.");
         } catch (Exception $e) {
             workerLog("Error Sonarr: " . $e->getMessage());
         }
     }
 
-    // ==================== RADARR (películas) ====================
+    // ==================== RADARR ====================
     $radarrEnabled = (($cfg['radarr_enabled'] ?? '0') === '1')
         || (($cfg['radarr_url'] ?? '') !== '' && ($cfg['radarr_api_key'] ?? '') !== '');
     if (!$radarrEnabled) {
@@ -144,14 +149,12 @@ function doScanMedia(): string {
             $radarrKey = $cfg['radarr_api_key'] ?? '';
             if (isEncrypted($radarrKey)) $radarrKey = decryptValue($radarrKey);
             $radarr = ArrFactory::radarr($cfg['radarr_url'] ?? '', $radarrKey);
-
             $movies = $radarr->getMovies();
 
-            $upsertMovie = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,tmdb_id,radarr_id,poster_url,overview,folder_path,video_path,has_spanish,has_file,updated_at) VALUES(?,'movie',?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,tmdb_id=excluded.tmdb_id,radarr_id=excluded.radarr_id,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,video_path=excluded.video_path,has_spanish=excluded.has_spanish,has_file=excluded.has_file,updated_at=CURRENT_TIMESTAMP");
+            $pdo = freshPDO();
+            $upsertMovie = $pdo->prepare("INSERT INTO movies (radarr_id, tmdb_id, title, year, overview, poster_url, folder_path, video_path, has_file, has_spanish, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(radarr_id) DO UPDATE SET tmdb_id=excluded.tmdb_id,title=excluded.title,year=excluded.year,overview=excluded.overview,poster_url=excluded.poster_url,folder_path=excluded.folder_path,video_path=excluded.video_path,has_file=excluded.has_file,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
 
-            $pdo->beginTransaction();
             foreach ($movies as $m) {
-                // 1) Radarr v3 embebe movieFile en el objeto de la película
                 $videoPath = '';
                 $mf = $m['movieFile'] ?? null;
                 if (is_array($mf)) {
@@ -160,7 +163,6 @@ function doScanMedia(): string {
                         $videoPath = rtrim($m['path'], '/') . '/' . ltrim($mf['relativePath'], '/');
                     }
                 }
-                // 2) Fallback: consultar el archivo por movieId (Radarr exige el filtro)
                 if ($videoPath === '') {
                     try {
                         $mfList = $radarr->getMovieFiles($m['id']);
@@ -172,10 +174,8 @@ function doScanMedia(): string {
                             }
                         }
                     } catch (Exception $e) {
-                        // Sin archivo por API; se intentará localmente
                     }
                 }
-                // 3) Último recurso: buscar un vídeo en la carpeta
                 if ($videoPath === '') {
                     $videoPath = SubtitleScanner::findVideoInFolder($m['path'] ?? '');
                 }
@@ -183,34 +183,39 @@ function doScanMedia(): string {
                 if ($videoPath && is_file($videoPath)) {
                     $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
                 }
-                $upsertMovie->execute(['movie:' . $m['id'], $m['title'], $m['year'], $m['tmdbId'], $m['id'], $m['poster'], $m['overview'], $m['path'], $videoPath, $hasSpanish, $m['hasFile'] ? 1 : 0]);
+                $upsertMovie->execute([(int)$m['id'], $m['tmdbId'] !== '' ? (int)$m['tmdbId'] : null, $m['title'], $m['year'], $m['overview'], $m['poster'], $m['path'], $videoPath, $m['hasFile'] ? 1 : 0, $hasSpanish]);
                 $stats['movies']++;
             }
-            $pdo->commit();
+            $pdo = null;
             $scanned['movies'] = true;
             workerLog("Radarr: {$stats['movies']} películas.");
         } catch (Exception $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
             workerLog("Error Radarr: " . $e->getMessage());
         }
     }
-        
-    // Limpiar solo los tipos que se escanearon correctamente
-    $pdo = freshPDO();
+
+    // Limpieza de registros obsoletos (solo tipos escaneados bien)
     $d = 0;
+    $pdo = freshPDO();
     if ($scanned['series'] || $scanned['episodes']) {
-        $d += $pdo->exec("DELETE FROM media_cache WHERE type IN ('series','episode') AND updated_at < '$scanTime'");
+        $d += $pdo->exec("DELETE FROM series WHERE updated_at < '$scanTime'");
+        $d += $pdo->exec("DELETE FROM episodes WHERE updated_at < '$scanTime'");
     }
     if ($scanned['movies']) {
-        $d += $pdo->exec("DELETE FROM media_cache WHERE type='movie' AND updated_at < '$scanTime'");
+        $d += $pdo->exec("DELETE FROM movies WHERE updated_at < '$scanTime'");
     }
     $pdo = null;
+
+    // Checkpoint final para compactar el WAL
+    $ck = freshPDO();
+    @$ck->exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    $ck = null;
+
     workerLog("Limpieza: $d registros.");
     $r = "{$stats['movies']} movies, {$stats['series']} series, {$stats['episodes']} eps.";
     workerLog("OK. $r");
     return $r;
 }
-
 function doTrans(int $taskId, string $payloadJson): void {
     $pl = json_decode($payloadJson, true);
     $jobId = $pl['job_id'] ?? '';
@@ -340,7 +345,12 @@ function doTrans(int $taskId, string $payloadJson): void {
     // Marcar completado
     $pdo = freshPDO();
     $pdo->beginTransaction();
-    $pdo->prepare("UPDATE media_cache SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
+    $jobType = strtolower(trim($job['type'] ?? ''));
+    if ($jobType === 'movie' || $jobType === 'movies') {
+        $pdo->prepare("UPDATE movies SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
+    } else {
+        $pdo->prepare("UPDATE episodes SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
+    }
     if ($logId) $pdo->prepare("UPDATE translation_log SET status='completed',finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$logId]);
     $pdo->prepare("DELETE FROM translation_jobs WHERE job_id=?")->execute([$jobId]);
     $pdo->commit();
