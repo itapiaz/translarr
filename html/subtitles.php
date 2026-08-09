@@ -120,13 +120,20 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
 
 <?php if ($type === 'movies' && $movieRow): ?>
     <!-- ===== PELÍCULA ===== -->
-    <div class="card glass-card">
+    <div class="card glass-card mb-4">
         <div class="card-body">
-            <!-- Subtítulos cargados via AJAX -->
-            <div id="subs-movie-<?= htmlspecialchars($id) ?>" class="subs-lazy" data-ep-id="<?= htmlspecialchars($id) ?>" data-type="movies">
-                <div class="text-center py-3">
-                    <div class="spinner-border spinner-border-sm text-info"></div>
-                    <span class="ms-2 text-muted small">Cargando subtítulos...</span>
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div>
+                    <h5 class="mb-1 text-muted"><i class="fa fa-closed-captioning me-2"></i>Subtítulos</h5>
+                    <div class="subs-badges">
+                        <span class="badge es-badge me-1 bg-secondary">ES</span>
+                        <span class="badge en-badge bg-secondary">EN</span>
+                    </div>
+                </div>
+                <div class="text-end">
+                    <button type="button" id="movie-translate-btn" class="btn btn-sm btn-outline-info translate-icon-btn" disabled title="Cargando...">
+                        <i class="fa fa-language"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -158,47 +165,39 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
                 <div id="collapseSeason<?= $seasonNum ?>" class="accordion-collapse collapse"
                      data-bs-parent="#seasonsAccordion">
                     <div class="accordion-body p-0">
-                        <div class="accordion accordion-flush" id="episodesAccordion<?= $seasonNum ?>">
-                            <?php foreach ($episodes as $ep): ?>
-                                <?php
-                                    $epNum   = (int)($ep['episode'] ?? 0);
-                                    $epTitle = htmlspecialchars($ep['title'] ?? 'Episodio ' . $epNum);
-                                    $epId    = $ep['id'];
-                                    $hasSp   = (bool)$ep['has_spanish'];
-                                ?>
-                                <div class="accordion-item" style="background: transparent; border-color: rgba(255,255,255,0.05);">
-                                    <h2 class="accordion-header" id="headingEp<?= $epId ?>">
-                                        <button class="accordion-button collapsed text-light" type="button"
-                                                data-bs-toggle="collapse"
-                                                data-bs-target="#collapseEp<?= $epId ?>"
-                                                style="background: transparent; font-size: 0.95rem;"
-                                                onclick="loadEpSubs('<?= htmlspecialchars($epId) ?>', '<?= htmlspecialchars($type) ?>')">
-                                            <i class="fa fa-play-circle text-info me-2"></i>
-                                            Episodio <?= sprintf('%02d', $epNum) ?>: <?= $epTitle ?>
-                                            <?php if ($hasSp): ?>
-                                                <span class="badge bg-success ms-3 fw-normal" style="font-size:0.68rem"><i class="fa fa-check"></i> ES</span>
-                                            <?php else: ?>
-                                                <span class="badge bg-danger ms-3 fw-normal" style="font-size:0.68rem">Falta ES</span>
-                                            <?php endif; ?>
-                                        </button>
-                                    </h2>
-                                    <div id="collapseEp<?= $epId ?>" class="accordion-collapse collapse"
-                                         data-bs-parent="#episodesAccordion<?= $seasonNum ?>">
-                                        <div class="accordion-body" style="background: rgba(0,0,0,0.1);">
-                                            <!-- Cargado bajo demanda -->
-                                            <div id="subs-ep-<?= htmlspecialchars($epId) ?>" class="subs-lazy"
-                                                 data-ep-id="<?= htmlspecialchars($epId) ?>"
-                                                 data-type="<?= htmlspecialchars($type) ?>"
-                                                 data-series-id="<?= htmlspecialchars($id) ?>">
-                                                <div class="text-center py-2">
-                                                    <div class="spinner-border spinner-border-sm text-info"></div>
-                                                    <span class="ms-2 text-muted small">Cargando subtítulos...</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-sm align-middle mb-0" style="font-size:0.9rem;">
+                                <thead>
+                                    <tr class="text-muted small">
+                                        <th style="width:90px;">Episodio</th>
+                                        <th>Título</th>
+                                        <th style="width:150px;">Subtítulos</th>
+                                        <th class="text-end" style="width:90px;">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="season-episodes-<?= $seasonNum ?>">
+                                    <?php foreach ($episodes as $ep): ?>
+                                        <?php
+                                            $epNum   = (int)($ep['episode'] ?? 0);
+                                            $epTitle = htmlspecialchars($ep['title'] ?? 'Episodio ' . $epNum);
+                                            $epId    = $ep['id'];
+                                        ?>
+                                        <tr data-ep-id="<?= $epId ?>" data-series-id="<?= htmlspecialchars($id) ?>" data-type="<?= htmlspecialchars($type) ?>" data-en-path="">
+                                            <td class="text-info fw-semibold">E<?= sprintf('%02d', $epNum) ?></td>
+                                            <td><?= $epTitle ?></td>
+                                            <td class="subs-badges">
+                                                <span class="badge es-badge me-1 bg-secondary">ES</span>
+                                                <span class="badge en-badge bg-secondary">EN</span>
+                                            </td>
+                                            <td class="text-end">
+                                                <button type="button" class="btn btn-sm btn-outline-info translate-icon-btn" disabled title="Cargando...">
+                                                    <i class="fa fa-language"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -213,42 +212,108 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
 <?php require_once 'includes/footer.php'; ?>
 
 <script>
-// ===== Carga de subtítulos bajo demanda (AJAX) =====
-const loadedSubs = new Set();
+// ===== Carga de subtítulos (batch por serie / película) =====
 const translatingIds = new Set(); // Evita traducciones duplicadas
 
-function loadEpSubs(epId, type) {
-    if (loadedSubs.has(epId)) return;
-    loadedSubs.add(epId);
+// Aplica el estado (badges ES/EN y botón) a una fila de episodio
+function applyEpisodeStatus(row, info, isIgnored) {
+    const esBadge = row.querySelector('.es-badge');
+    const enBadge = row.querySelector('.en-badge');
+    const btn = row.querySelector('.translate-icon-btn');
+    if (!esBadge || !enBadge || !btn) return;
 
-    const container = document.getElementById('subs-ep-' + epId);
-    if (!container || container.dataset.loaded) return;
-    container.dataset.loaded = '1';
+    row.dataset.enPath = info.english_path || '';
 
-    const seriesId = container.dataset.seriesId || '';
-    fetch('ajax_subtitles.php?ep_id=' + encodeURIComponent(epId) + '&type=' + encodeURIComponent(type) + '&series_id=' + encodeURIComponent(seriesId))
-        .then(r => r.json())
-        .then(data => {
-            if (data.html) {
-                container.innerHTML = data.html;
-            } else {
-                container.innerHTML = '<p class="text-muted small mb-0"><i class="fa fa-info-circle"></i> No hay subtítulos descargados.</p>';
-            }
-        })
-        .catch(() => {
-            container.innerHTML = '<p class="text-danger small mb-0">Error al cargar subtítulos.</p>';
-        });
+    // Badges de subtítulos
+    esBadge.className = 'badge es-badge me-1 ' + (info.has_es ? 'bg-info' : 'bg-danger bg-opacity-25');
+    enBadge.className = 'badge en-badge ' + (info.has_en ? 'bg-primary' : 'bg-danger bg-opacity-25');
+
+    // Serie/película no monitorizada: sin acciones
+    if (isIgnored) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-ban"></i>';
+        btn.title = 'No monitorizada';
+        return;
+    }
+    // Traducción en curso/pendiente
+    if (info.translation_status) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-clock-o"></i>';
+        btn.title = 'Traducción en curso...';
+        return;
+    }
+    // Sin subtítulo en inglés: no se puede traducir
+    if (!info.has_en) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-language"></i>';
+        btn.title = 'No hay subtítulo en inglés';
+        return;
+    }
+    btn.disabled = false;
+    if (info.has_es) {
+        btn.innerHTML = '<i class="fa fa-refresh"></i>';
+        btn.title = 'Re-traducir a español';
+    } else {
+        btn.innerHTML = '<i class="fa fa-language"></i>';
+        btn.title = 'Traducir a español';
+    }
 }
 
-// Cargar subtítulos de películas automáticamente al entrar
-document.querySelectorAll('.subs-lazy[data-type="movies"]').forEach(el => {
-    const epId = el.dataset.epId;
-    const seriesId = el.dataset.seriesId || '';
-    fetch('ajax_subtitles.php?ep_id=' + encodeURIComponent(epId) + '&type=movies&series_id=' + encodeURIComponent(seriesId))
-        .then(r => r.json())
-        .then(data => { el.innerHTML = data.html || '<p class="text-muted small mb-0">Sin subtítulos.</p>'; })
-        .catch(() => { el.innerHTML = '<p class="text-danger small mb-0">Error.</p>'; });
-});
+// Carga el estado de todos los episodios de una serie (una sola petición)
+async function loadSeriesStatus(seriesId) {
+    try {
+        const res = await fetch('ajax_subtitles.php?action=series_status&series_id=' + encodeURIComponent(seriesId));
+        const data = await res.json();
+        if (data.status !== 'success') return;
+        const map = {};
+        (data.episodes || []).forEach(e => map[e.id] = e);
+        document.querySelectorAll('tr[data-ep-id]').forEach(row => {
+            const info = map[row.dataset.epId];
+            if (info) applyEpisodeStatus(row, info, !!data.is_ignored);
+        });
+    } catch (e) { /* silencioso */ }
+}
+
+// Carga el estado de una película
+async function loadMovieStatus(mediaId, type) {
+    try {
+        const res = await fetch('ajax_subtitles.php?action=movie_status&ep_id=' + encodeURIComponent(mediaId) + '&type=' + encodeURIComponent(type));
+        const data = await res.json();
+        if (data.status !== 'success') return;
+        const esBadge = document.querySelector('.es-badge');
+        const enBadge = document.querySelector('.en-badge');
+        const btn = document.getElementById('movie-translate-btn');
+        if (!esBadge || !enBadge || !btn) return;
+        esBadge.className = 'badge es-badge me-1 ' + (data.has_es ? 'bg-info' : 'bg-danger bg-opacity-25');
+        enBadge.className = 'badge en-badge ' + (data.has_en ? 'bg-primary' : 'bg-danger bg-opacity-25');
+        btn.dataset.enPath = data.english_path || '';
+        btn.dataset.mediaId = mediaId;
+        btn.dataset.type = type;
+        btn.dataset.seriesId = '';
+        if (data.is_ignored) {
+            btn.disabled = true; btn.innerHTML = '<i class="fa fa-ban"></i>'; btn.title = 'No monitorizada';
+        } else if (data.translation_status) {
+            btn.disabled = true; btn.innerHTML = '<i class="fa fa-clock-o"></i>'; btn.title = 'Traducción en curso...';
+        } else if (!data.has_en) {
+            btn.disabled = true; btn.innerHTML = '<i class="fa fa-language"></i>'; btn.title = 'No hay subtítulo en inglés';
+        } else {
+            btn.disabled = false;
+            if (data.has_es) { btn.innerHTML = '<i class="fa fa-refresh"></i>'; btn.title = 'Re-traducir a español'; }
+            else { btn.innerHTML = '<i class="fa fa-language"></i>'; btn.title = 'Traducir a español'; }
+        }
+    } catch (e) { /* silencioso */ }
+}
+
+// Inicialización según el tipo de página
+(function () {
+    const type = '<?= htmlspecialchars($type) ?>';
+    const id = <?= (int)$id ?>;
+    if (type === 'series') {
+        loadSeriesStatus(id);
+    } else {
+        loadMovieStatus(id, type);
+    }
+})();
 
 // Helper: envía POST como application/x-www-form-urlencoded
 function postJSON(url, params) {
@@ -299,7 +364,9 @@ async function startTranslation(type, mediaId, seriesId, path, btnElement) {
                 translatingIds.delete(mediaId);
                 statusEl.innerHTML = '<span class="text-danger"><i class="fa fa-exclamation-circle me-1"></i>Error: ' + (statusData.result || 'desconocido') + '</span>';
                 btnElement.disabled = false;
-                btnElement.innerHTML = '<i class="fa fa-language"></i> Reintentar';
+                btnElement.innerHTML = '<i class="fa fa-language me-1"></i> Reintentar';
+                btnElement.classList.remove('btn-outline-info');
+                btnElement.classList.add('btn-outline-warning');
             }
         }, 10000);
 
@@ -307,9 +374,24 @@ async function startTranslation(type, mediaId, seriesId, path, btnElement) {
         translatingIds.delete(mediaId);
         statusEl.innerHTML = '<span class="text-danger"><i class="fa fa-exclamation-circle me-1"></i>Error: ' + e.message + '</span>';
         btnElement.disabled = false;
-        btnElement.innerHTML = '<i class="fa fa-language"></i> Reintentar';
+        btnElement.innerHTML = '<i class="fa fa-language me-1"></i> Reintentar';
+        btnElement.classList.remove('btn-outline-info');
+        btnElement.classList.add('btn-outline-warning');
     }
 }
+
+// Delegación de clics para botones de epísodio y película (solo-icono)
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.translate-icon-btn');
+    if (!btn || btn.disabled) return;
+    const isMovieBtn = btn.id === 'movie-translate-btn';
+    const type = isMovieBtn ? (btn.dataset.type || 'movies') : (btn.closest('tr').dataset.type || 'series');
+    const mediaId = isMovieBtn ? btn.dataset.mediaId : btn.closest('tr').dataset.epId;
+    const seriesId = isMovieBtn ? (btn.dataset.seriesId || '') : (btn.closest('tr').dataset.seriesId || '');
+    const path = btn.dataset.enPath || (isMovieBtn ? '' : btn.closest('tr').dataset.enPath);
+    if (!path) { alert('No hay subtítulo en inglés para traducir.'); return; }
+    startTranslation(type, mediaId, seriesId, path, btn);
+});
 
 async function confirmTranslateAll(seriesId, type) {
     const msg = '¿Estás seguro de que deseas traducir TODA la serie al español?\n\n'

@@ -22,6 +22,100 @@ if (!$epId) {
     exit;
 }
 
+// ============================================================
+// Acción: estado masivo de una serie (un solo request)
+// ============================================================
+$action = $_GET['action'] ?? '';
+if ($action === 'series_status') {
+    $sid = (int)($_GET['series_id'] ?? 0);
+    if ($sid <= 0) { echo json_encode(['status' => 'error', 'message' => 'ID de serie inválido.']); exit; }
+    $ig = $pdo->prepare("SELECT is_ignored FROM series WHERE id = ?");
+    $ig->execute([$sid]);
+    $isIgnored = (int)$ig->fetchColumn() === 1;
+
+    // Unir con la carpeta de la serie para el fallback de subtítulos
+    $epStmt = $pdo->prepare("SELECT e.id, e.video_path, s.folder_path, e.has_spanish FROM episodes e JOIN series s ON s.id = e.series_id WHERE e.series_id=? AND e.has_file=1");
+    $epStmt->execute([$sid]);
+    $eps = $epStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $ids = [];
+    $out = [];
+    foreach ($eps as $ep) {
+        $subtitles = [];
+        $videoPath = $ep['video_path'] ?? '';
+        if ($videoPath && is_file($videoPath)) {
+            $subtitles = SubtitleScanner::findSubtitlesForVideo($videoPath);
+        } elseif (!empty($ep['folder_path']) && is_dir($ep['folder_path'])) {
+            $subtitles = SubtitleScanner::findSubtitlesInFolder($ep['folder_path']);
+        }
+        $en = SubtitleScanner::englishSubtitle($subtitles);
+        $hasEs = SubtitleScanner::hasSpanish($subtitles) || ((int)$ep['has_spanish'] === 1);
+        $ids[] = (int)$ep['id'];
+        $out[] = [
+            'id'          => (int)$ep['id'],
+            'has_es'      => $hasEs,
+            'has_en'      => ($en !== null),
+            'english_path'=> $en ? $en['path'] : null,
+            'translation_status' => null,
+        ];
+    }
+
+    // Estado de traducciones pendientes/en curso para estos episodios
+    if (!empty($ids)) {
+        $in = implode(',', $ids);
+        $pend = $pdo->query("SELECT media_id, status FROM translation_log WHERE media_id IN ($in) AND status IN ('pending','running')")->fetchAll(PDO::FETCH_ASSOC);
+        $pendMap = [];
+        foreach ($pend as $p) $pendMap[(int)$p['media_id']] = $p['status'];
+        foreach ($out as &$o) $o['translation_status'] = $pendMap[$o['id']] ?? null;
+        unset($o);
+    }
+
+    echo json_encode(['status' => 'success', 'is_ignored' => $isIgnored, 'episodes' => $out]);
+    exit;
+}
+
+// ============================================================
+// Acción: estado de una película (un solo request)
+// ============================================================
+if ($action === 'movie_status') {
+    $mid = (int)($epId ?? 0);
+    if ($mid <= 0) { echo json_encode(['status' => 'error', 'message' => 'ID inválido.']); exit; }
+    $ig = $pdo->prepare("SELECT is_ignored FROM movies WHERE id = ?");
+    $ig->execute([$mid]);
+    $isIgnored = (int)$ig->fetchColumn() === 1;
+
+    $row = $pdo->prepare("SELECT * FROM movies WHERE id = ?");
+    $row->execute([$mid]);
+    $media = $row->fetch(PDO::FETCH_ASSOC);
+
+    $subtitles = [];
+    if ($media) {
+        $videoPath = $media['video_path'] ?? '';
+        if ($videoPath && is_file($videoPath)) {
+            $subtitles = SubtitleScanner::findSubtitlesForVideo($videoPath);
+        } elseif (!empty($media['folder_path']) && is_dir($media['folder_path'])) {
+            $subtitles = SubtitleScanner::findSubtitlesInFolder($media['folder_path']);
+        }
+    }
+    $en = SubtitleScanner::englishSubtitle($subtitles);
+    $hasEs = SubtitleScanner::hasSpanish($subtitles) || ((int)($media['has_spanish'] ?? 0) === 1);
+
+    $translationStatus = null;
+    $pendStmt = $pdo->prepare("SELECT status FROM translation_log WHERE media_id = ? AND status IN ('pending','running') ORDER BY created_at DESC LIMIT 1");
+    $pendStmt->execute([$mid]);
+    $translationStatus = $pendStmt->fetchColumn() ?: null;
+
+    echo json_encode([
+        'status' => 'success',
+        'is_ignored' => $isIgnored,
+        'has_es' => $hasEs,
+        'has_en' => ($en !== null),
+        'english_path' => $en ? $en['path'] : null,
+        'translation_status' => $translationStatus,
+    ]);
+    exit;
+}
+
 try {
     // Obtener el medio desde la BD para conocer sus rutas
     if ($type === 'movies' || $type === 'movie') {
