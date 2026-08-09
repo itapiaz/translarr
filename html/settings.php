@@ -164,6 +164,29 @@ $currentPathMappingSeriesFrom = $currentSettings['path_mapping_series_from'] ?? 
 $currentPathMappingSeriesTo = $currentSettings['path_mapping_series_to'] ?? '';
 $currentAutoScan = $currentSettings['auto_scan_enabled'] ?? '1';
 $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
+
+// Resumen de proveedores configurados y modelos cacheados
+require_once 'includes/TranslationProviderFactory.php';
+require_once 'includes/TranslationModelRepository.php';
+$providerSummary = [];
+$providerLabels = ['deepseek' => 'DeepSeek', 'gemini' => 'Google Gemini', 'openai' => 'OpenAI', 'mistral' => 'Mistral AI'];
+foreach ($providerLabels as $pk => $pl) {
+    $rawKey = $currentSettings[$pk . '_api_key'] ?? '';
+    $hasKey = !empty($rawKey);
+    $models = TranslationModelRepository::get($pdo, $pk);
+    $sync = TranslationModelRepository::syncStatus($pdo, $pk);
+    $selectable = 0;
+    foreach ($models as $m) { if ((int)$m['is_selectable'] === 1) $selectable++; }
+    $providerSummary[$pk] = [
+        'label'      => $pl,
+        'hasKey'     => $hasKey,
+        'isActive'   => ($currentTranslationProvider === $pk),
+        'total'      => count($models),
+        'selectable' => $selectable,
+        'fetchedAt'  => $sync['fetched_at'] ?? null,
+        'syncStatus' => $sync['status'] ?? null,
+    ];
+}
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -372,6 +395,49 @@ $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
                     </div>
                     </form>
                 </div>
+<!-- PANE 2b: PROVEEDORES Y MODELOS DISPONIBLES -->
+<div class="card glass-card mb-4">
+    <div class="card-header bg-dark border-secondary text-purple fw-bold">
+        <i class="fa fa-cubes"></i> Proveedores y modelos disponibles
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                <thead>
+                    <tr>
+                        <th>Proveedor</th>
+                        <th style="width:130px;">API Key</th>
+                        <th style="width:90px;">Modelos</th>
+                        <th style="width:90px;">Aptos</th>
+                        <th style="width:160px;">Última sincronización</th>
+                        <th style="width:90px;">Activo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($providerSummary as $pk => $ps): ?>
+                        <tr class="<?= $ps['isActive'] ? 'table-primary' : '' ?>">
+                            <td><strong><?= htmlspecialchars($ps['label']) ?></strong></td>
+                            <td>
+                                <?php if ($ps['hasKey']): ?>
+                                    <span class="badge bg-success"><i class="fa fa-check"></i> Configurada</span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary">Sin guardar</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= (int)$ps['total'] ?></td>
+                            <td><?= (int)$ps['selectable'] ?></td>
+                            <td class="text-muted"><small><?= $ps['fetchedAt'] ? htmlspecialchars($ps['fetchedAt']) : '—' ?></small></td>
+                            <td><?= $ps['isActive'] ? '<span class="badge bg-info">Sí</span>' : '<span class="text-muted">No</span>' ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <div class="card-body pt-2 small text-muted">
+            <i class="fa fa-info-circle"></i> Los proveedores cloud no instalan modelos localmente: TransLarr descubre los modelos de cada API y los guarda en caché. Marca una clave como "Configurada" al pulsar "Guardar IA / Traducción".
+        </div>
+    </div>
+</div>
 
             <!-- PANE 3: TAREAS PROGRAMADAS -->
             <div class="tab-pane fade" id="pane-tasks" role="tabpanel">
@@ -578,9 +644,18 @@ function loadCachedModels(pk) {
     })
         .then(r => r.json())
         .then(data => {
-            // Conservar la opción actualmente seleccionada
+            // Solo conservar el modelo actual si pertenece al proveedor seleccionado
             const current = modelSel.value;
+            const currentBelongs = current === '' || (data.models || []).some(m => m.model_id === current);
             modelSel.innerHTML = '';
+
+            // Opción por defecto
+            const autoOpt = document.createElement('option');
+            autoOpt.value = '';
+            autoOpt.textContent = '(auto-seleccionar al traducir)';
+            if (!currentBelongs || current === '') autoOpt.selected = true;
+            modelSel.appendChild(autoOpt);
+
             if (data.models && data.models.length > 0) {
                 data.models.forEach(m => {
                     const opt = document.createElement('option');
@@ -589,18 +664,36 @@ function loadCachedModels(pk) {
                     if (m.model_id === current) opt.selected = true;
                     modelSel.appendChild(opt);
                 });
-            } else {
-                const opt = document.createElement('option');
-                opt.value = current || '';
-                opt.textContent = current || '(auto-seleccionar al traducir)';
-                opt.selected = true;
-                modelSel.appendChild(opt);
             }
             if (data.sync && data.sync.fetched_at) {
                 uiAiFeedback('Última actualización: ' + data.sync.fetched_at + '.', 'ok');
             }
         })
         .catch(() => uiAiFeedback('No se pudo cargar los modelos.', 'err'));
+}
+
+// Puebla el combo directamente desde una lista de modelos (sin segunda consulta).
+function populateModelsFromList(pk, models, message) {
+    const modelSel = document.getElementById('translation_model');
+    if (!modelSel) return;
+    const current = modelSel.value;
+    const currentBelongs = current === '' || models.some(m => m.id === current);
+    modelSel.innerHTML = '';
+
+    const autoOpt = document.createElement('option');
+    autoOpt.value = '';
+    autoOpt.textContent = '(auto-seleccionar al traducir)';
+    if (!currentBelongs || current === '') autoOpt.selected = true;
+    modelSel.appendChild(autoOpt);
+
+    models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.display_name || m.id;
+        if (m.id === current) opt.selected = true;
+        modelSel.appendChild(opt);
+    });
+    if (message) uiAiFeedback(message, 'ok');
 }
 
 // Botón "Actualizar" modelos
@@ -621,8 +714,8 @@ if (btnSync) {
             .then(r => r.json())
             .then(data => {
                 if (data.status === 'success') {
-                    uiAiFeedback(data.message, 'ok');
-                    loadCachedModels(pk);
+                    // Poblar el combo directamente con los modelos recién sincronizados
+                    populateModelsFromList(pk, data.models || [], data.message);
                 } else {
                     uiAiFeedback(data.message || 'Error al actualizar modelos.', 'err');
                     if (data.models && data.models.length > 0) loadCachedModels(pk);

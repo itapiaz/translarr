@@ -26,8 +26,27 @@ if (!in_array($providerKey, ['deepseek', 'gemini', 'openai', 'mistral'], true)) 
     exit;
 }
 
-// Usar la API key enviada por el usuario (si la acaba de escribir).
-// Si viene vacía, se usa la que ya está guardada cifrada en SQLite.
+$providerKey = strtolower(trim($_POST['provider'] ?? ''));
+if (!in_array($providerKey, ['deepseek', 'gemini', 'openai', 'mistral'], true)) {
+    echo json_encode(['status' => 'error', 'message' => 'Proveedor inválido.']);
+    exit;
+}
+
+$action = $_POST['action'] ?? 'list';
+
+// action = 'list' → solo desde caché SQLite, sin requerir API key.
+if ($action === 'list') {
+    $models = TranslationModelRepository::get($pdo, $providerKey);
+    $sync = TranslationModelRepository::syncStatus($pdo, $providerKey);
+    echo json_encode([
+        'status' => 'success',
+        'models' => $models,
+        'sync'   => $sync,
+    ]);
+    exit;
+}
+
+// action = 'sync' → requiere API key (temporal enviada por POST, o la guardada cifrada).
 $apiKey = trim($_POST['api_key'] ?? '');
 if ($apiKey === '') {
     $keySetting = $providerKey . '_api_key';
@@ -50,7 +69,6 @@ if (!$provider) {
     exit;
 }
 
-$action = $_POST['action'] ?? 'list';
 try {
     if ($action === 'sync') {
         $models = $provider->listModels();
@@ -63,14 +81,7 @@ try {
         exit;
     }
 
-    // action = 'list' → desde caché
-    $models = TranslationModelRepository::get($pdo, $providerKey);
-    $sync = TranslationModelRepository::syncStatus($pdo, $providerKey);
-    echo json_encode([
-        'status'  => 'success',
-        'models'  => $models,
-        'sync'    => $sync,
-    ]);
+    echo json_encode(['status' => 'error', 'message' => 'Acción inválida.']);
     exit;
 } catch (Exception $e) {
     try {
