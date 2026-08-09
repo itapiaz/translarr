@@ -10,8 +10,8 @@ services:
     volumes:
       - ./config:/config
       - ./html:/app/www/public
-      - /home/media/movies:/home/media/movies
-      - /home/media/tvshows:/home/media/tvshows
+      - /home/media/movies:/movies
+      - /home/media/tvshows:/tv
     ports:
       - "4646:80"
     restart: unless-stopped

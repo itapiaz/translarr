@@ -55,10 +55,11 @@ function csrf_require(): void {
 
 /**
  * Obtiene o genera la clave de encriptación del sistema.
- * La clave se deriva de una clave maestra almacenada en un archivo fuera del webroot.
+ * La clave se deriva de una clave maestra almacenada en un archivo
+ * dentro del volumen persistente /config (sobrevive a recreaciones del contenedor).
  */
 function getEncryptionKey(): string {
-    $keyFile = __DIR__ . '/../../config/encryption.key';
+    $keyFile = '/config/encryption.key';
     $keyDir = dirname($keyFile);
     
     // Crear el directorio si no existe
