@@ -30,7 +30,7 @@ try {
     $seriesTitle = $stmtS->fetchColumn() ?: '';
 
     // Obtener todos los episodios de la serie desde la caché
-    $epsStmt = $pdo->prepare("SELECT * FROM media_cache WHERE series_id = ? AND type='episode' ORDER BY season ASC, episode ASC");
+    $epsStmt = $pdo->prepare("SELECT * FROM media_cache WHERE series_id = ? AND type='episode' AND has_file=1 ORDER BY season ASC, episode ASC");
     $epsStmt->execute([$seriesId]);
     $episodes = $epsStmt->fetchAll(PDO::FETCH_ASSOC);
 

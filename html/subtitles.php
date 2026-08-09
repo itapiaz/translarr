@@ -28,7 +28,7 @@ if ($type === 'series') {
     $stmt = $pdo->prepare("
         SELECT id, title, season, episode, has_spanish, subtitle_path, subtitle_lang
         FROM media_cache
-        WHERE series_id=? AND type='episode'
+        WHERE series_id=? AND type='episode' AND has_file=1
         ORDER BY season ASC, episode ASC
     ");
     $stmt->execute([$id]);

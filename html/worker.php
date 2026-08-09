@@ -53,6 +53,7 @@ $_migrations = [
     "ALTER TABLE media_cache ADD COLUMN radarr_id TEXT",
     "ALTER TABLE media_cache ADD COLUMN tmdb_id TEXT",
     "ALTER TABLE media_cache ADD COLUMN video_path TEXT",
+    "ALTER TABLE media_cache ADD COLUMN has_file INTEGER DEFAULT 0",
 ];
 foreach ($_migrations as $_sql) {
     try { $_migPdo->exec($_sql); } catch (Exception $_e) { /* columna ya existe, ignorar */ }
@@ -97,7 +98,7 @@ function doScanMedia(): string {
             $pdo->commit();
             $scanned['series'] = true;
 
-            $upsertEp = $pdo->prepare("INSERT INTO media_cache(id,type,series_id,title,season,episode,tvdb_id,sonarr_series_id,sonarr_episode_id,video_path,folder_path,has_spanish,updated_at) VALUES(?,'episode',?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET series_id=excluded.series_id,title=excluded.title,season=excluded.season,episode=excluded.episode,tvdb_id=excluded.tvdb_id,sonarr_series_id=excluded.sonarr_series_id,sonarr_episode_id=excluded.sonarr_episode_id,video_path=excluded.video_path,folder_path=excluded.folder_path,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
+            $upsertEp = $pdo->prepare("INSERT INTO media_cache(id,type,series_id,title,season,episode,tvdb_id,sonarr_series_id,sonarr_episode_id,video_path,folder_path,has_spanish,has_file,updated_at) VALUES(?,'episode',?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET series_id=excluded.series_id,title=excluded.title,season=excluded.season,episode=excluded.episode,tvdb_id=excluded.tvdb_id,sonarr_series_id=excluded.sonarr_series_id,sonarr_episode_id=excluded.sonarr_episode_id,video_path=excluded.video_path,folder_path=excluded.folder_path,has_spanish=excluded.has_spanish,has_file=excluded.has_file,updated_at=CURRENT_TIMESTAMP");
             foreach ($seriesList as $s) {
                 try {
                     $eps = $sonarr->getEpisodes($s['id']);
@@ -117,7 +118,7 @@ function doScanMedia(): string {
                         if ($videoPath && is_file($videoPath)) {
                             $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
                         }
-                        $upsertEp->execute(['episode:' . $ep['id'], 'series:' . $s['id'], $ep['title'], (int)$ep['season'], (int)$ep['episode'], $ep['tvdbEpisodeId'], $s['id'], $ep['id'], $videoPath, $s['path'], $hasSpanish]);
+                        $upsertEp->execute(['episode:' . $ep['id'], 'series:' . $s['id'], $ep['title'], (int)$ep['season'], (int)$ep['episode'], $ep['tvdbEpisodeId'], $s['id'], $ep['id'], $videoPath, $s['path'], $hasSpanish, $ep['hasFile'] ? 1 : 0]);
                         $stats['episodes']++;
                     }
                     $pdo->commit();
@@ -146,7 +147,7 @@ function doScanMedia(): string {
 
             $movies = $radarr->getMovies();
 
-            $upsertMovie = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,tmdb_id,radarr_id,poster_url,overview,folder_path,video_path,has_spanish,updated_at) VALUES(?,'movie',?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,tmdb_id=excluded.tmdb_id,radarr_id=excluded.radarr_id,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,video_path=excluded.video_path,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
+            $upsertMovie = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,tmdb_id,radarr_id,poster_url,overview,folder_path,video_path,has_spanish,has_file,updated_at) VALUES(?,'movie',?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,tmdb_id=excluded.tmdb_id,radarr_id=excluded.radarr_id,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,video_path=excluded.video_path,has_spanish=excluded.has_spanish,has_file=excluded.has_file,updated_at=CURRENT_TIMESTAMP");
 
             $pdo->beginTransaction();
             foreach ($movies as $m) {
@@ -182,7 +183,7 @@ function doScanMedia(): string {
                 if ($videoPath && is_file($videoPath)) {
                     $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
                 }
-                $upsertMovie->execute(['movie:' . $m['id'], $m['title'], $m['year'], $m['tmdbId'], $m['id'], $m['poster'], $m['overview'], $m['path'], $videoPath, $hasSpanish]);
+                $upsertMovie->execute(['movie:' . $m['id'], $m['title'], $m['year'], $m['tmdbId'], $m['id'], $m['poster'], $m['overview'], $m['path'], $videoPath, $hasSpanish, $m['hasFile'] ? 1 : 0]);
                 $stats['movies']++;
             }
             $pdo->commit();

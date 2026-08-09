@@ -9,11 +9,11 @@ require_once 'includes/header.php';
 // Películas sin español (1 consulta SQL)
 $incompleteMovies = $pdo->query("
     SELECT * FROM media_cache
-    WHERE type='movie' AND has_spanish=0
+    WHERE type='movie' AND has_spanish=0 AND has_file=1
     ORDER BY title ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$totalMovies = $pdo->query("SELECT COUNT(*) FROM media_cache WHERE type='movie'")->fetchColumn();
+$totalMovies = $pdo->query("SELECT COUNT(*) FROM media_cache WHERE type='movie' AND has_file=1")->fetchColumn();
 
 // Series: agrupar con conteo de episodios sin español (1 consulta SQL con subquery)
 $seriesWithMissing = $pdo->query("
@@ -23,14 +23,21 @@ $seriesWithMissing = $pdo->query("
         s.poster_url AS poster,
         COUNT(e.id)  AS missing_count
     FROM media_cache s
-    LEFT JOIN media_cache e ON e.series_id = s.id AND e.type='episode' AND e.has_spanish=0
+    LEFT JOIN media_cache e ON e.series_id = s.id AND e.type='episode' AND e.has_spanish=0 AND e.has_file=1
     WHERE s.type='series'
     GROUP BY s.id, s.title, s.poster_url
     HAVING missing_count > 0
     ORDER BY s.title ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$totalSeries = $pdo->query("SELECT COUNT(*) FROM media_cache WHERE type='series'")->fetchColumn();
+$totalSeries = $pdo->query("
+    SELECT COUNT(*) FROM media_cache s
+    WHERE s.type='series'
+      AND EXISTS (
+          SELECT 1 FROM media_cache e
+          WHERE e.series_id = s.id AND e.type='episode' AND e.has_file=1
+      )
+")->fetchColumn();
 
 // Última actualización del caché
 $lastUpdate = $pdo->query("SELECT MAX(updated_at) FROM media_cache")->fetchColumn();

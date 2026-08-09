@@ -58,6 +58,7 @@ try {
         id TEXT PRIMARY KEY, type TEXT NOT NULL, series_id TEXT,
         title TEXT NOT NULL, year TEXT, poster_url TEXT,
         has_spanish INTEGER DEFAULT 0,
+        has_file INTEGER DEFAULT 0,
         subtitle_path TEXT, subtitle_lang TEXT,
         season INTEGER DEFAULT 0, episode INTEGER DEFAULT 0,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -103,6 +104,10 @@ try {
     }
     try {
         $pdo->exec("ALTER TABLE media_cache ADD COLUMN video_path TEXT");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE media_cache ADD COLUMN has_file INTEGER DEFAULT 0");
     } catch (Exception $e) {
     }
 
