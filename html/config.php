@@ -200,6 +200,7 @@ try {
             ('mistral_api_key', ''),
             ('translation_provider', 'deepseek'),
             ('translation_model', ''),
+            ('translation_fallback_providers', ''),
             ('chunk_size', '50'),
             ('path_mapping_movies_from', ''),
             ('path_mapping_movies_to', ''),
@@ -261,6 +262,7 @@ try {
     define('DEEPSEEK_SYSTEM_PROMPT', $settings['system_prompt'] ?? '');
     define('TRANSLATION_PROVIDER', $settings['translation_provider'] ?? 'deepseek');
     define('TRANSLATION_MODEL', $settings['translation_model'] ?? '');
+    define('TRANSLATION_FALLBACK_PROVIDERS', $settings['translation_fallback_providers'] ?? '');
 
     define('PATH_MAPPING_MOVIES_FROM', $settings['path_mapping_movies_from'] ?? '');
     define('PATH_MAPPING_MOVIES_TO', $settings['path_mapping_movies_to'] ?? '');
@@ -282,6 +284,7 @@ try {
         'mistral_api_key' => '',
         'translation_provider' => 'deepseek',
         'translation_model' => '',
+        'translation_fallback_providers' => '',
         'system_prompt' => '',
         'chunk_size' => '50',
         'auto_scan_enabled' => '1',

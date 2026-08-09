@@ -117,7 +117,7 @@ abstract class AbstractTranslationProvider implements TranslationProviderInterfa
     {
         $id = strtolower($id);
         $blocked = [
-            'embedding', 'embeddings', 'audio', 'tts', 'speech', 'whisper',
+            'embedding', 'embeddings', 'embed', 'audio', 'tts', 'speech', 'whisper',
             'image', 'dall-e', 'gpt-image', 'video', 'vision', 'moderation',
             'instruct-detection', 'guidance', 'rerank', 'reranker', 'classifier',
             'ocr', 'fim', 'completion-prefix', 'math', 'text-embedding',

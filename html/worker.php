@@ -269,70 +269,91 @@ function doTrans(int $taskId, string $payloadJson): void {
     
     // Leer config fresca del proveedor desde BD (el worker puede haber arrancado antes de guardarla)
     $pdoCfg = freshPDO();
-    $cfgRows = $pdoCfg->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('system_prompt','translation_provider','translation_model','deepseek_api_key','gemini_api_key','openai_api_key','mistral_api_key')")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $cfgRows = $pdoCfg->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('system_prompt','translation_provider','translation_model','translation_fallback_providers','deepseek_api_key','gemini_api_key','openai_api_key','mistral_api_key')")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdoCfg = null;
 
     // Proveedor y modelo: congelados en la tarea si existen, si no usar la config actual
-    $providerKey = $pl['provider'] ?? ($cfgRows['translation_provider'] ?? 'deepseek');
-    $model = $pl['model'] ?? ($cfgRows['translation_model'] ?? '');
-
-    $keySetting = $providerKey . '_api_key';
-    $apiKey = $cfgRows[$keySetting] ?? '';
-    if (!empty($apiKey) && isEncrypted($apiKey)) $apiKey = decryptValue($apiKey);
+    $primaryKey = $pl['provider'] ?? ($cfgRows['translation_provider'] ?? 'deepseek');
+    $primaryModel = $pl['model'] ?? ($cfgRows['translation_model'] ?? '');
     $systemPrompt = $cfgRows['system_prompt'] ?? DEEPSEEK_SYSTEM_PROMPT;
 
-    if (empty($apiKey)) {
-        workerLog("  Error: API Key de '$providerKey' no configurada. Ve a Configuracion > IA > Traduccion.");
-        markError($logId, "API Key vacia para '$providerKey'");
-        return;
-    }
+    // Construir lista de candidatos: principal primero, luego fallbacks configurados
+    $fallbackList = array_values(array_filter(array_map('trim', explode(',', $cfgRows['translation_fallback_providers'] ?? ''))));
+    $orderedKeys = array_values(array_unique(array_merge([$primaryKey], $fallbackList)));
 
-    $provider = TranslationProviderFactory::create($providerKey, $apiKey);
-    if (!$provider) {
-        workerLog("  Error: Proveedor '$providerKey' no soportado.");
-        markError($logId, "Proveedor '$providerKey' no soportado");
-        return;
-    }
+    $candidates = []; // [ ['key'=>, 'provider'=>obj, 'model'=>] ]
+    foreach ($orderedKeys as $k) {
+        $keySetting = $k . '_api_key';
+        $apiKey = $cfgRows[$keySetting] ?? '';
+        if (!empty($apiKey) && isEncrypted($apiKey)) $apiKey = decryptValue($apiKey);
+        if (empty($apiKey)) continue;
 
-    // Si no hay modelo definido, auto-seleccionar el primero recomendado de la API
-    if (empty($model)) {
-        $available = $provider->listModels();
-        foreach ($available as $m) {
-            if (!empty($m['is_recommended'])) {
-                $model = $m['id'];
-                break;
+        $provider = TranslationProviderFactory::create($k, $apiKey);
+        if (!$provider) continue;
+
+        // Modelo: el de la tarea si es el proveedor principal; si no, auto-seleccionar
+        $m = ($k === $primaryKey && $primaryModel !== '') ? $primaryModel : '';
+        if ($m === '') {
+            try {
+                $available = $provider->listModels();
+                foreach ($available as $mm) { if (!empty($mm['is_recommended'])) { $m = $mm['id']; break; } }
+                if ($m === '') $m = $available[0]['id'] ?? '';
+            } catch (Exception $e) {
+                workerLog("  [$k] no se pudo listar modelos: ".$e->getMessage());
+                continue;
             }
         }
-        if (empty($model)) {
-            $model = $available[0]['id'] ?? '';
-        }
-        if (empty($model)) {
-            workerLog("  Error: No se pudo determinar un modelo para '$providerKey'.");
-            markError($logId, "Sin modelo para '$providerKey'");
-            return;
-        }
-        workerLog("  Modelo auto-seleccionado: $model");
+        if ($m === '') continue;
+
+        $candidates[] = ['key' => $k, 'provider' => $provider, 'model' => $m];
     }
+
+    if (empty($candidates)) {
+        workerLog("  Error: no hay proveedor con API key configurada para traducir.");
+        markError($logId, "Sin proveedor configurado");
+        return;
+    }
+    workerLog("  Candidatos: ".implode(', ', array_map(fn($c) => $c['key'].'/'.$c['model'], $candidates)));
 
     $results = [];
     $total = count($chunks);
 
     for ($i = 0; $i < $total; $i++) {
         workerLog("  Chunk ".($i+1)."/$total...");
-        try {
-            $out = $provider->translate($model, $systemPrompt, implode("\n\n", $chunks[$i]));
-        } catch (Exception $e) {
-            workerLog("  Error $providerKey: ".$e->getMessage());
-            markError($logId, "$providerKey: ".$e->getMessage());
+        $translated = false;
+        $lastErr = '';
+        // Intentar con cada candidato, empezando por el principal
+        foreach ($candidates as $cand) {
+            try {
+                $out = $cand['provider']->translate($cand['model'], $systemPrompt, implode("\n\n", $chunks[$i]));
+            } catch (Exception $e) {
+                $lastErr = $e->getMessage();
+                workerLog("    {$cand['key']} falló: ".$e->getMessage());
+                // Reordenar: mover el candidato que falló al final para no repetirlo sin motivo
+                $first = array_shift($candidates);
+                $candidates[] = $first;
+                continue;
+            }
+            $t = $out['content'] ?? '';
+            if ($t === '') {
+                $lastErr = "Respuesta vacía";
+                workerLog("    {$cand['key']} devolvió vacío.");
+                $first = array_shift($candidates);
+                $candidates[] = $first;
+                continue;
+            }
+            $providerKey = $cand['key'];
+            $model = $cand['model'];
+            $translated = true;
+            break;
+        }
+
+        if (!$translated) {
+            workerLog("  Error: todos los proveedores fallaron ($lastErr)");
+            markError($logId, "Todos los proveedores fallaron: $lastErr");
             return;
         }
-        $t = $out['content'] ?? '';
-        if ($t === '') {
-            workerLog("  Error: Resp vacia");
-            markError($logId, "Resp vacia chunk ".($i+1));
-            return;
-        }
-        
+
         $lines = explode("\n", str_replace("\r\n","\n",$t));
         $clean = []; $in = false;
         foreach ($lines as $l) { if (strpos(trim($l),'```')===0) { $in=!$in; continue; } if($in||strpos($t,'```')===false) $clean[]=$l; }

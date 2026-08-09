@@ -33,7 +33,7 @@ if (file_exists($workerLogPath)) {
 $translationLogs = [];
 try {
     $stmt = $pdo->query("
-        SELECT id, media_id, media_title, media_type, season, episode, status, result, created_at, finished_at 
+        SELECT id, media_id, media_title, media_type, season, episode, status, result, provider, model, created_at, finished_at 
         FROM translation_log 
         ORDER BY created_at DESC 
         LIMIT 50
@@ -149,6 +149,7 @@ try {
                                 <th>Medio</th>
                                 <th style="width:80px;">Tipo</th>
                                 <th style="width:80px;">Episodio</th>
+                                <th style="width:110px;">Proveedor</th>
                                 <th style="width:120px;">Estado</th>
                                 <th style="width:140px;">Iniciado</th>
                                 <th>Resultado</th>
@@ -157,7 +158,7 @@ try {
                         <tbody>
                             <?php if (empty($translationLogs)): ?>
                                 <tr>
-                                    <td colspan="6" class="text-center py-4 text-muted">
+                                    <td colspan="7" class="text-center py-4 text-muted">
                                         <i class="fa fa-inbox fa-2x mb-2" style="opacity: 0.3;"></i><br>
                                         No hay traducciones registradas aún.
                                     </td>
@@ -183,6 +184,7 @@ try {
                                         <td><strong><?= htmlspecialchars($tl['media_title'] ?: 'Sin título') ?></strong></td>
                                         <td><?= $typeIcon ?></td>
                                         <td><small class="text-muted"><?= $epInfo ?></small></td>
+                                        <td><?= !empty($tl['provider']) ? '<span class="badge bg-info text-dark">' . htmlspecialchars(ucfirst($tl['provider'])) . ($tl['model'] ? ' · ' . htmlspecialchars($tl['model']) : '') . '</span>' : '<span class="text-muted">-</span>' ?></td>
                                         <td><?= $statusBadge ?></td>
                                         <td class="text-muted"><small class="utc-date"><?= htmlspecialchars($tl['created_at']) ?></small></td>
                                         <td><code class="text-muted bg-dark p-1 rounded" style="word-break: break-all; font-size:0.75rem;"><?= htmlspecialchars(substr($tl['result'] ?: ($tl['status'] === 'completed' ? 'Completado' : 'En espera...'), 0, 100)) ?></code></td>

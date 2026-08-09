@@ -81,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? $_POST['translation_provider']
             : 'deepseek';
         $model = trim($_POST['translation_model'] ?? '');
+        $fallbackProviders = trim($_POST['translation_fallback_providers'] ?? '');
 
         // Guardar cada API key (conservando la cifrada si no cambió)
         $keys = ['deepseek', 'gemini', 'openai', 'mistral'];
@@ -102,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $stmt->execute(['translation_provider', $provider]);
             $stmt->execute(['translation_model', $model]);
+            $stmt->execute(['translation_fallback_providers', $fallbackProviders]);
             $stmt->execute(['system_prompt', $systemPrompt]);
             $stmt->execute(['chunk_size', $chunkSize]);
             $pdo->commit();
@@ -153,6 +155,7 @@ $currentMistralApiKey = (!empty($currentMistralApiKeyRaw) && isEncrypted($curren
     : $currentMistralApiKeyRaw;
 $currentTranslationProvider = $currentSettings['translation_provider'] ?? 'deepseek';
 $currentTranslationModel = $currentSettings['translation_model'] ?? '';
+$currentFallbackProviders = $currentSettings['translation_fallback_providers'] ?? '';
 $currentSystemPrompt = $currentSettings['system_prompt'] ?? '';
 $currentChunkSize = $currentSettings['chunk_size'] ?? '50';
 $currentPathMappingMoviesFrom = $currentSettings['path_mapping_movies_from'] ?? '';
@@ -340,6 +343,13 @@ $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
                                     <button type="button" class="btn btn-outline-success" id="btn-test-model"><i class="fa fa-plug me-1"></i> Probar</button>
                                 </div>
                                 <div class="form-text text-muted" id="ai-model-feedback">Los modelos se cargan desde la API del proveedor. Usa "Actualizar" para refrescar la lista.</div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="translation_fallback_providers" class="form-label">Proveedores de respaldo (fallback)</label>
+                                <input type="text" class="form-control" id="translation_fallback_providers" name="translation_fallback_providers"
+                                       value="<?= htmlspecialchars($currentFallbackProviders) ?>" placeholder="gemini,mistral,openai">
+                                <div class="form-text text-muted">Si el proveedor activo falla (clave inválida, límite, red), TransLarr probará automáticamente estos proveedores en orden. Sepáralos con comas.</div>
                             </div>
 
                             <div class="mb-4">
