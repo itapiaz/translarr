@@ -1,25 +1,14 @@
-# Runtime configuration, secrets, certificates, logs, and SQLite data
+# Runtime data, secrets, and logs
+# /config/ holds the live SQLite database (with API credentials), worker.log and worker.lock
 /config/
+
+# SQLite artifacts (safety net, in case databases appear outside /config/)
 *.sqlite
 *.sqlite-*
-*.db
-*.db-*
-*.key
-*.pem
-*.crt
+
+# Logs and lock files
 *.log
 *.lock
-
-# Legacy MariaDB data directory
-/db_data/
-
-# Local archives and backups
-*.zip
-*.tar
-*.tar.gz
-*.bak
-*.backup
-*.corrupt
 
 # Editor and operating-system files
 .vscode/
