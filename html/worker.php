@@ -449,6 +449,13 @@ function doTrans(int $taskId, string $payloadJson): void {
     $results = [];
     $total = count($chunks);
 
+    // Registrar el total de partes para el progreso visible en Logs
+    try {
+        $pdoT = freshPDO();
+        $pdoT->prepare("UPDATE translation_jobs SET total_chunks=? WHERE job_id=?")->execute([$total, $jobId]);
+        $pdoT = null;
+    } catch (Exception $e) {}
+
     for ($i = 0; $i < $total; $i++) {
         $chunkStart = microtime(true);
         workerLog("  Chunk ".($i+1)."/$total...");
@@ -500,7 +507,7 @@ function doTrans(int $taskId, string $payloadJson): void {
         
         $pdo = freshPDO();
         $pdo->beginTransaction();
-        $pdo->prepare("UPDATE translation_jobs SET results=? WHERE job_id=?")->execute([json_encode($results),$jobId]);
+        $pdo->prepare("UPDATE translation_jobs SET results=?, completed_chunks=? WHERE job_id=?")->execute([json_encode($results), $i + 1, $jobId]);
         $pdo->commit();
         $pdo = null;
     }

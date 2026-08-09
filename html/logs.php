@@ -195,7 +195,13 @@ if (file_exists($workerLogPath)) {
                                         <td><?= !empty($tl['provider']) ? '<span class="badge bg-info text-dark">' . htmlspecialchars(ucfirst($tl['provider'])) . ($tl['model'] ? ' · ' . htmlspecialchars($tl['model']) : '') . '</span>' : '<span class="text-muted">-</span>' ?></td>
                                         <td><?= $statusBadge ?></td>
                                         <td class="text-muted"><small class="utc-date"><?= htmlspecialchars($tl['created_at']) ?></small></td>
-                                        <td><code class="text-muted bg-dark p-1 rounded" style="word-break: break-all; font-size:0.75rem;"><?= htmlspecialchars(substr($tl['result'] ?: ($tl['status'] === 'completed' ? 'Completado' : 'En espera...'), 0, 120)) ?></code></td>
+                                        <td class="translation-result" data-log-id="<?= (int)$tl['id'] ?>" data-status="<?= htmlspecialchars($tl['status']) ?>">
+                                            <?php if (in_array($tl['status'], ['pending', 'running'], true)): ?>
+                                                <span class="translation-progress-label"><i class="fa fa-clock-o me-1"></i>En cola / ejecutando...</span>
+                                            <?php else: ?>
+                                                <code class="text-muted bg-dark p-1 rounded" style="word-break: break-all; font-size:0.75rem;"><?= htmlspecialchars(substr($tl['result'] ?: ($tl['status'] === 'completed' ? 'Completado' : 'En espera...'), 0, 120)) ?></code>
+                                            <?php endif; ?>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
@@ -334,6 +340,41 @@ document.addEventListener('DOMContentLoaded', function() {
         textarea.value = text;
         textarea.scrollTop = textarea.scrollHeight;
     }
+
+    // ===== Progreso dinámico de traducciones =====
+    function updateTranslationProgress() {
+        const resultCells = document.querySelectorAll('.translation-result[data-status="pending"], .translation-result[data-status="running"]');
+        if (resultCells.length === 0) return;
+
+        fetch('ajax_tasks.php?action=translation_progress')
+            .then(r => r.json())
+            .then(data => {
+                if (!data.progress) return;
+                let stillActive = false;
+                resultCells.forEach(cell => {
+                    const logId = cell.dataset.logId;
+                    const pr = data.progress[logId];
+                    if (!pr) return;
+                    const label = cell.querySelector('.translation-progress-label');
+                    if (!label) return;
+                    stillActive = true;
+                    if (pr.total_chunks > 0) {
+                        label.innerHTML = '<i class="fa fa-refresh fa-spin me-1"></i>' + pr.completed_chunks + ' / ' + pr.total_chunks + ' partes';
+                        // Barra de progreso compacta
+                        const pct = Math.min(100, Math.round((pr.completed_chunks / pr.total_chunks) * 100));
+                        label.innerHTML += '<div class="progress mt-1" style="height:4px;width:120px;"><div class="progress-bar bg-info" style="width:' + pct + '%"></div></div>';
+                    } else {
+                        label.innerHTML = '<i class="fa fa-clock-o me-1"></i>En cola / ejecutando...';
+                    }
+                });
+                return stillActive;
+            })
+            .catch(() => {});
+    }
+
+    updateTranslationProgress();
+    // Polling mientras haya traducciones activas
+    setInterval(updateTranslationProgress, 5000);
 });
 </script>
 

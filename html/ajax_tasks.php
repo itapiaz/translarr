@@ -154,6 +154,38 @@ switch ($action) {
         break;
 
     // --------------------------------------------------
+    // Progreso de traducciones activas (para Logs)
+    // --------------------------------------------------
+    case 'translation_progress':
+        $tasks = $pdo->query("SELECT id, status, payload FROM background_tasks WHERE type='translate' AND status IN ('pending','running')")->fetchAll(PDO::FETCH_ASSOC);
+        $progress = [];
+        foreach ($tasks as $t) {
+            $pl = json_decode($t['payload'] ?? '', true);
+            if (!is_array($pl)) continue;
+            $logId = (int)($pl['log_id'] ?? 0);
+            $jobId = $pl['job_id'] ?? '';
+            if (!$logId) continue;
+            $completed = 0;
+            $total = 0;
+            if ($jobId !== '') {
+                $row = $pdo->prepare("SELECT total_chunks, completed_chunks FROM translation_jobs WHERE job_id=?");
+                $row->execute([$jobId]);
+                $jr = $row->fetch(PDO::FETCH_ASSOC);
+                if ($jr) {
+                    $total = (int)$jr['total_chunks'];
+                    $completed = (int)$jr['completed_chunks'];
+                }
+            }
+            $progress[$logId] = [
+                'task_status'     => $t['status'],
+                'completed_chunks'=> $completed,
+                'total_chunks'    => $total,
+            ];
+        }
+        echo json_encode(['status' => 'success', 'progress' => $progress]);
+        break;
+
+    // --------------------------------------------------
     // Conteo de traducciones pendientes
     // --------------------------------------------------
     case 'pending_translations':

@@ -135,6 +135,16 @@ try {
     } catch (Exception $e) {
     }
 
+    // Migración: progreso de traducción por chunk en translation_jobs
+    try {
+        $pdo->exec("ALTER TABLE translation_jobs ADD COLUMN total_chunks INTEGER DEFAULT 0");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE translation_jobs ADD COLUMN completed_chunks INTEGER DEFAULT 0");
+    } catch (Exception $e) {
+    }
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS rate_limits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         endpoint TEXT NOT NULL, ip TEXT NOT NULL,
