@@ -438,6 +438,7 @@ foreach ($providerLabels as $pk => $pl) {
         </div>
     </div>
 </div>
+                </div><!-- /pane-ai -->
 
             <!-- PANE 3: TAREAS PROGRAMADAS -->
             <div class="tab-pane fade" id="pane-tasks" role="tabpanel">
