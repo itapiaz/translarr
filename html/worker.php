@@ -279,6 +279,44 @@ function doTrans(int $taskId, string $payloadJson): void {
     $job = $st->fetch(PDO::FETCH_ASSOC);
     $pdo = null;
     if (!$job) { workerLog("  Error: Job no encontrado"); return; }
+
+    // Si la película o la serie del episodio está "No monitorizar", cancelar la tarea
+    $jobType = strtolower(trim($job['type'] ?? ''));
+    $isMovieJob = ($jobType === 'movies' || $jobType === 'movie');
+    $mediaId = $job['media_id'] ?? $pl['media_id'] ?? '';
+    $seriesId = $job['series_id'] ?? $pl['series_id'] ?? '';
+    $ignored = false;
+    $ignPdo = freshPDO();
+    try {
+        if ($isMovieJob) {
+            $ig = $ignPdo->prepare("SELECT COUNT(*) FROM movies WHERE id=? AND is_ignored=1");
+            $ig->execute([$mediaId]);
+            $ignored = (int)$ig->fetchColumn() > 0;
+        } else {
+            $sid = $seriesId;
+            if ($sid === '' && $mediaId !== '') {
+                $sidQ = $ignPdo->prepare("SELECT series_id FROM episodes WHERE id=?");
+                $sidQ->execute([$mediaId]);
+                $sid = (string)$sidQ->fetchColumn();
+            }
+            if ($sid !== '') {
+                $ig = $ignPdo->prepare("SELECT COUNT(*) FROM series WHERE id=? AND is_ignored=1");
+                $ig->execute([$sid]);
+                $ignored = (int)$ig->fetchColumn() > 0;
+            }
+        }
+    } catch (Exception $e) {}
+    $ignPdo = null;
+    if ($ignored) {
+        workerLog("  Tarea cancelada: elemento marcado como no monitorizar.");
+        // Cancelar el log de traducción
+        if ($logId) {
+            $c = freshPDO();
+            $c->prepare("UPDATE translation_log SET status='cancelled', result='Marcada como no monitorizar', finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$logId]);
+            $c = null;
+        }
+        return;
+    }
     
     $chunks = json_decode($job['chunks'], true);
 

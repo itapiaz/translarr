@@ -3,12 +3,12 @@
 require_once 'includes/header.php';
 
 // Leer desde la caché de la BD (instantáneo)
-$movies = $pdo->query("SELECT * FROM movies WHERE has_file=1 ORDER BY title ASC")->fetchAll(PDO::FETCH_ASSOC);
+$movies = $pdo->query("SELECT * FROM movies WHERE has_file=1 AND is_ignored=0 ORDER BY title ASC")->fetchAll(PDO::FETCH_ASSOC);
 $cacheEmpty = empty($movies);
 
 // Última actualización del caché
 $lastUpdate = $pdo->query("
-    SELECT MAX(updated_at) FROM movies WHERE has_file=1
+    SELECT MAX(updated_at) FROM movies WHERE has_file=1 AND is_ignored=0
 ")->fetchColumn();
 ?>
 

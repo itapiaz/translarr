@@ -23,10 +23,11 @@ if (!$seriesId) {
 try {
     // Leer episodios faltantes desde media_cache (instantáneo, sin API ni disco)
     $stmt = $pdo->prepare("
-        SELECT id, title, season, episode
-        FROM episodes
-        WHERE series_id = ? AND has_file = 1 AND has_spanish = 0
-        ORDER BY season ASC, episode ASC
+        SELECT e.id, e.title, e.season, e.episode
+        FROM episodes e
+        JOIN series s ON s.id = e.series_id
+        WHERE e.series_id = ? AND e.has_file = 1 AND e.has_spanish = 0 AND s.is_ignored = 0
+        ORDER BY e.season ASC, e.episode ASC
     ");
     $stmt->execute([$seriesId]);
     $episodes = $stmt->fetchAll(PDO::FETCH_ASSOC);

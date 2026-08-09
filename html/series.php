@@ -5,7 +5,7 @@ require_once 'includes/header.php';
 // Leer desde la caché de la BD (instantáneo)
 $series = $pdo->query("
     SELECT s.* FROM series s
-    WHERE EXISTS (
+    WHERE s.is_ignored=0 AND EXISTS (
         SELECT 1 FROM episodes e
         WHERE e.series_id = s.id AND e.has_file=1
     )

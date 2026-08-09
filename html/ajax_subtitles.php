@@ -63,6 +63,23 @@ try {
     $pendingStmt->execute([$epId]);
     $hasPending = $pendingStmt->fetchColumn() > 0;
 
+    // Comprobar si el elemento (o su serie) está marcado como "No monitorizar"
+    $isIgnored = false;
+    if ($type === 'movies' || $type === 'movie') {
+        $ig = $pdo->prepare("SELECT is_ignored FROM movies WHERE id = ?");
+        $ig->execute([$epId]);
+        $isIgnored = (int)$ig->fetchColumn() === 1;
+    } else {
+        $ig = $pdo->prepare("SELECT s.is_ignored FROM episodes e JOIN series s ON s.id = e.series_id WHERE e.id = ?");
+        $ig->execute([$epId]);
+        $isIgnored = (int)$ig->fetchColumn() === 1;
+    }
+
+    if ($isIgnored) {
+        echo json_encode(['html' => '<p class="text-muted small mb-0"><i class="fa fa-pause me-1"></i>Este elemento está marcado como <strong>No monitorizar</strong>. Se han desactivado las traducciones.</p>']);
+        exit;
+    }
+
     $html  = '<div class="table-responsive">';
     $html .= '<table class="table table-dark table-hover table-sm align-middle mb-0">';
     $html .= '<thead><tr><th>Idioma</th><th>Detalles</th><th style="width:250px;">Traducción / Estado</th></tr></thead><tbody>';

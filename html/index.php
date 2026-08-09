@@ -9,11 +9,11 @@ require_once 'includes/header.php';
 // Películas sin español (1 consulta SQL)
 $incompleteMovies = $pdo->query("
     SELECT * FROM movies
-    WHERE has_spanish=0 AND has_file=1
+    WHERE has_spanish=0 AND has_file=1 AND is_ignored=0
     ORDER BY title ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$totalMovies = $pdo->query("SELECT COUNT(*) FROM movies WHERE has_file=1")->fetchColumn();
+$totalMovies = $pdo->query("SELECT COUNT(*) FROM movies WHERE has_file=1 AND is_ignored=0")->fetchColumn();
 
 // Series: agrupar con conteo de episodios sin español (1 consulta SQL con subquery)
 $seriesWithMissing = $pdo->query("
@@ -24,6 +24,7 @@ $seriesWithMissing = $pdo->query("
         COUNT(e.id)  AS missing_count
     FROM series s
     LEFT JOIN episodes e ON e.series_id = s.id AND e.has_spanish=0 AND e.has_file=1
+    WHERE s.is_ignored=0
     GROUP BY s.id, s.title, s.poster_url
     HAVING missing_count > 0
     ORDER BY s.title ASC
@@ -31,7 +32,7 @@ $seriesWithMissing = $pdo->query("
 
 $totalSeries = $pdo->query("
     SELECT COUNT(*) FROM series s
-    WHERE EXISTS (
+    WHERE s.is_ignored=0 AND EXISTS (
         SELECT 1 FROM episodes e
         WHERE e.series_id = s.id AND e.has_file=1
     )

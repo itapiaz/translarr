@@ -125,6 +125,16 @@ try {
     } catch (Exception $e) {
     }
 
+    // Migración: columna "is_ignored" para excluir películas/series de la monitorización
+    try {
+        $pdo->exec("ALTER TABLE movies ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE series ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0");
+    } catch (Exception $e) {
+    }
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS rate_limits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         endpoint TEXT NOT NULL, ip TEXT NOT NULL,

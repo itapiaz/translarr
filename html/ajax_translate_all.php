@@ -25,9 +25,25 @@ if (empty($seriesId)) {
 
 try {
     // Obtener título de la serie
-    $stmtS = $pdo->prepare("SELECT title FROM series WHERE id = ?");
+    $stmtS = $pdo->prepare("SELECT title, is_ignored FROM series WHERE id = ?");
     $stmtS->execute([$seriesId]);
-    $seriesTitle = $stmtS->fetchColumn() ?: '';
+    $seriesRow = $stmtS->fetch(PDO::FETCH_ASSOC);
+    $seriesTitle = $seriesRow['title'] ?? '';
+    $seriesIgnored = (int)($seriesRow['is_ignored'] ?? 0) === 1;
+
+    // Si la serie está marcada como "No monitorizar", no encolar nada
+    if ($seriesIgnored) {
+        echo json_encode([
+            'status'     => 'error',
+            'message'    => 'Esta serie está marcada como "No monitorizar". Vuelve a monitorizarla desde su página antes de traducir.',
+            'encolados'  => 0,
+            'sin_ingles' => 0,
+            'ya_es'      => 0,
+            'total'      => 0,
+            'batch_size' => $batchSize,
+        ]);
+        exit;
+    }
 
     // Obtener todos los episodios de la serie desde la BD
     $epsStmt = $pdo->prepare("SELECT * FROM episodes WHERE series_id = ? AND has_file=1 ORDER BY season ASC, episode ASC");

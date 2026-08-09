@@ -129,6 +129,24 @@ try {
             if ($seriesTitle) $mediaTitle = $seriesTitle;
         }
 
+        // Rechazar traducción si la película, o la serie del episodio, está "No monitorizar"
+        $isIgnored = false;
+        if ($isMovie) {
+            $ig = $pdo->prepare("SELECT is_ignored FROM movies WHERE id = ?");
+            $ig->execute([$media_id]);
+            $isIgnored = (int)$ig->fetchColumn() === 1;
+        } else {
+            $seriesIdForCheck = $series_id ?: ($mediaRow['series_id'] ?? null);
+            if ($seriesIdForCheck) {
+                $ig = $pdo->prepare("SELECT is_ignored FROM series WHERE id = ?");
+                $ig->execute([$seriesIdForCheck]);
+                $isIgnored = (int)$ig->fetchColumn() === 1;
+            }
+        }
+        if ($isIgnored) {
+            throw new Exception("Este elemento está marcado como \"No monitorizar\". Vuelve a monitorizarlo desde su página antes de traducir.");
+        }
+
         // Construir etiqueta descriptiva para el panel de tareas
         $taskLabel = $mediaTitle;
         if ($type === 'episode' || $type === 'series') {

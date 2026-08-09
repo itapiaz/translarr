@@ -55,11 +55,13 @@ $posterUrl = $itemData['poster_url'] ?? '';
 $year = $itemData['year'] ?? '';
 $overview = $itemData['overview'] ?? 'Sin descripción disponible. Por favor, ejecuta un Escaneo Manual de medios para obtener esta información.';
 $folderPath = $itemData['folder_path'] ?? 'Ruta no disponible. Por favor, realiza un escaneo.';
+$isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
 ?>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h2 class="mb-0 text-muted"><i class="fa fa-closed-captioning text-primary me-2"></i> Gestión de Subtítulos</h2>
     <a href="javascript:history.back()" class="btn btn-outline-light btn-sm"><i class="fa fa-arrow-left"></i> Volver</a>
 </div>
+<input type="hidden" id="monitor-csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
 
 <div class="card glass-card mb-4" style="background: rgba(20,20,25,0.7); border: 1px solid rgba(255,255,255,0.1);">
     <div class="card-body d-flex flex-column flex-md-row gap-4">
@@ -99,13 +101,29 @@ $folderPath = $itemData['folder_path'] ?? 'Ruta no disponible. Por favor, realiz
                 <?= htmlspecialchars($overview) ?>
             </p>
             <?php if ($type === 'series'): ?>
-                <div class="mt-3">
-                    <button class="btn btn-sm btn-outline-info" onclick="confirmTranslateAll('<?= htmlspecialchars($id) ?>', '<?= htmlspecialchars($type) ?>')">
+                <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-info" onclick="confirmTranslateAll('<?= htmlspecialchars($id) ?>', '<?= htmlspecialchars($type) ?>')" <?= $isIgnored ? 'disabled' : '' ?>>
                         <i class="fa fa-language me-1"></i> Traducir toda la serie
                     </button>
+                    <?php if ($isIgnored): ?>
+                        <span class="badge bg-secondary" title="Serie excluida de la monitorización"><i class="fa fa-pause me-1"></i> Serie no monitorizada</span>
+                    <?php endif; ?>
                     <small class="text-muted ms-2">Solo episodios con subtítulo en inglés y sin español</small>
                 </div>
             <?php endif; ?>
+            <div class="mt-3">
+                <?php if ($isIgnored): ?>
+                    <span class="badge bg-secondary mb-2" title="Elemento excluido de la monitorización"><i class="fa fa-pause me-1"></i> No monitorizada</span>
+                    <button class="btn btn-sm btn-outline-success d-block" onclick="toggleMonitor('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'monitor')">
+                        <i class="fa fa-play me-1"></i> Volver a monitorizar
+                    </button>
+                <?php else: ?>
+                    <button class="btn btn-sm btn-outline-danger d-block" onclick="toggleMonitor('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'ignore')">
+                        <i class="fa fa-ban me-1"></i> No monitorizar
+                    </button>
+                <?php endif; ?>
+                <small class="text-muted d-block mt-1">No aparecerá como pendiente ni se encolarán traducciones automáticas.</small>
+            </div>
         </div>
     </div>
 </div>
@@ -336,5 +354,37 @@ async function confirmTranslateAll(seriesId, type) {
     }
 
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa fa-language me-1"></i> Traducir toda la serie'; }
+}
+
+// ===== No monitorizar / Volver a monitorizar =====
+async function toggleMonitor(type, id, action) {
+    const title = document.querySelector('.fw-bold.text-white')?.textContent?.trim() || 'este elemento';
+    const verb = (action === 'ignore') ? 'No monitorizar' : 'Volver a monitorizar';
+    let msg;
+    if (action === 'ignore') {
+        msg = '¿Dejar de monitorizar "' + title + '"?\n\nNo aparecerá como pendiente y se cancelarán sus traducciones en cola.';
+        if (!confirm(msg)) return;
+    }
+    const csrf = document.getElementById('monitor-csrf')?.value || '';
+    const btn = event?.target?.closest('button');
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch('ajax_monitor.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ action: action, type: type, id: id, _csrf_token: csrf })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            alert(data.message);
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.message || 'desconocido'));
+        }
+    } catch (e) {
+        alert('Error de conexión: ' + e.message);
+    }
+    if (btn) btn.disabled = false;
 }
 </script>
