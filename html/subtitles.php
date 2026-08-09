@@ -118,11 +118,6 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
             <p class="text-light text-opacity-75 mb-0" style="font-size: 0.95rem; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; text-align: justify;">
                 <?= htmlspecialchars($overview) ?>
             </p>
-            <?php if ($isIgnored): ?>
-                <div class="mt-3">
-                    <span class="badge bg-secondary" title="Elemento excluido de la monitorización"><i class="fa fa-pause me-1"></i> No monitorizada</span>
-                </div>
-            <?php endif; ?>
         </div>
     </div>
 </div>
