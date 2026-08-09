@@ -363,9 +363,12 @@ foreach ($providerLabels as $pk => $pl) {
                                         <?php endforeach; ?>
                                     </select>
                                     <button type="button" class="btn btn-outline-info" id="btn-sync-models"><i class="fa fa-refresh me-1"></i> Actualizar</button>
-                                    <button type="button" class="btn btn-outline-success" id="btn-test-model"><i class="fa fa-plug me-1"></i> Probar</button>
                                 </div>
                                 <div class="form-text text-muted" id="ai-model-feedback">Los modelos se cargan desde la API del proveedor. Usa "Actualizar" para refrescar la lista.</div>
+                                <div class="mt-3">
+                                    <button type="button" class="btn btn-outline-success" id="btn-test-model"><i class="fa fa-plug me-1"></i> Probar conexión</button>
+                                    <div class="form-text text-muted mt-1">Comprueba que la API key es válida y que el modelo seleccionado responde correctamente.</div>
+                                </div>
                             </div>
 
                             <div class="mb-4">
@@ -394,7 +397,7 @@ foreach ($providerLabels as $pk => $pl) {
                         <button type="submit" class="btn btn-gradient btn-lg w-100 shadow"><i class="fa fa-save me-2"></i> Guardar IA / Traducción</button>
                     </div>
                     </form>
-                </div>
+
 <!-- PANE 2b: PROVEEDORES Y MODELOS DISPONIBLES -->
 <div class="card glass-card mb-4">
     <div class="card-header bg-dark border-secondary text-purple fw-bold">
