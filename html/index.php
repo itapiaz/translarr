@@ -82,7 +82,7 @@ $cacheEmpty = ($totalMovies == 0 && $totalSeries == 0);
                                 ?>
                                 <tr style="cursor: pointer;" onclick="window.location.href='subtitles.php?type=movies&id=<?= $mediaId ?>'" class="table-row-hover">
                                     <td style="width: 60px; padding: 5px;">
-                                        <img src="<?= $poster ?>" alt="Poster" class="img-fluid rounded" style="width: 45px; height: 65px; object-fit: cover;">
+                                        <img src="<?= $poster ?>" alt="Poster" class="img-fluid rounded" style="width: 45px; height: 65px; object-fit: cover;" onerror="this.style.display='none'">
                                     </td>
                                     <td>
                                         <h6 class="mb-1"><?= $title ?></h6>
@@ -131,7 +131,7 @@ $cacheEmpty = ($totalMovies == 0 && $totalSeries == 0);
                                 ?>
                                 <tr style="cursor: pointer;" onclick="window.location.href='subtitles.php?type=series&id=<?= $mediaId ?>'" class="table-row-hover">
                                     <td style="width: 60px; padding: 5px;">
-                                        <img src="<?= $poster ?>" alt="Poster" class="img-fluid rounded" style="width: 45px; height: 65px; object-fit: cover;">
+                                        <img src="<?= $poster ?>" alt="Poster" class="img-fluid rounded" style="width: 45px; height: 65px; object-fit: cover;" onerror="this.style.display='none'">
                                     </td>
                                     <td>
                                         <h6 class="mb-1"><?= $title ?></h6>

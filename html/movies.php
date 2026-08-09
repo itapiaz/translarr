@@ -67,7 +67,7 @@ $lastUpdate = $pdo->query("
                         ?>
                         <tr style="cursor: pointer;" onclick="window.location.href='subtitles.php?type=movies&id=<?= $mediaId ?>'" class="table-row-hover movie-row" data-title="<?= strtolower($title) ?>">
                             <td style="width: 80px;">
-                                <img src="<?= $poster ?>" alt="Poster" class="img-fluid rounded" style="width: 60px; height: 90px; object-fit: cover;">
+                                <img src="<?= $poster ?>" alt="Poster" class="img-fluid rounded" style="width: 60px; height: 90px; object-fit: cover;" onerror="this.style.display='none'">
                             </td>
                             <td>
                                 <h5 class="mb-1"><?= $title ?></h5>

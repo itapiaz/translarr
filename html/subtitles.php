@@ -65,7 +65,7 @@ $folderPath = $itemData['folder_path'] ?? 'Ruta no disponible. Por favor, realiz
     <div class="card-body d-flex flex-column flex-md-row gap-4">
         <?php if ($posterUrl): ?>
             <div style="flex-shrink: 0; width: 140px; text-align: center;">
-                <img src="<?= htmlspecialchars($posterUrl) ?>" class="img-fluid rounded shadow-sm" alt="Poster" style="max-height: 210px; object-fit: cover;">
+                <img src="<?= htmlspecialchars($posterUrl) ?>" class="img-fluid rounded shadow-sm" alt="Poster" style="max-height: 210px; object-fit: cover;" onerror="this.style.display='none'">
             </div>
         <?php endif; ?>
         <div class="flex-grow-1">

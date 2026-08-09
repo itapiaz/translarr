@@ -108,11 +108,16 @@ abstract class ArrClient {
 
     /**
      * Extrae la URL de una imagen del listado de imágenes de Sonarr/Radarr.
+     * Si la URL es relativa (empieza por /), se antepone la URL base del servicio.
      */
     protected function extractImage($images, $coverType): string {
         foreach ($images ?? [] as $img) {
             if (($img['coverType'] ?? '') === $coverType && !empty($img['url'])) {
-                return $img['url'];
+                $url = $img['url'];
+                if (strpos($url, '/') === 0) {
+                    $url = $this->url . $url;
+                }
+                return $url;
             }
         }
         return '';
