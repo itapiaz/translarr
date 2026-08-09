@@ -20,6 +20,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/ArrFactory.php';
 require_once __DIR__ . '/includes/SubtitleScanner.php';
 require_once __DIR__ . '/includes/security.php';
+require_once __DIR__ . '/includes/TranslationProviderFactory.php';
 
 // La conexión global abierta por config.php no se usa en el worker;
 // cerrarla evita que retenga bloqueos sobre la BD durante el bucle.
@@ -266,38 +267,71 @@ function doTrans(int $taskId, string $payloadJson): void {
     if (empty($chunks)) { workerLog("  Error: Sin contenido para traducir"); markError($logId, "Sin chunks"); return; }
 
     
-    // Leer DeepSeek config fresca desde BD (el worker puede haber arrancado antes de guardarla)
+    // Leer config fresca del proveedor desde BD (el worker puede haber arrancado antes de guardarla)
     $pdoCfg = freshPDO();
-    $cfgRows = $pdoCfg->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('deepseek_api_key','system_prompt')")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $cfgRows = $pdoCfg->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('system_prompt','translation_provider','translation_model','deepseek_api_key','gemini_api_key','openai_api_key','mistral_api_key')")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdoCfg = null;
-    $dsKey = $cfgRows['deepseek_api_key'] ?? '';
-    if (isEncrypted($dsKey)) $dsKey = decryptValue($dsKey);
-    $dsPrompt = $cfgRows['system_prompt'] ?? DEEPSEEK_SYSTEM_PROMPT;
-    
-    if (empty($dsKey)) {
-        workerLog("  Error: API Key de DeepSeek no configurada. Ve a Configuracion > DeepSeek AI.");
-        markError($logId, "API Key de DeepSeek vacia");
+
+    // Proveedor y modelo: congelados en la tarea si existen, si no usar la config actual
+    $providerKey = $pl['provider'] ?? ($cfgRows['translation_provider'] ?? 'deepseek');
+    $model = $pl['model'] ?? ($cfgRows['translation_model'] ?? '');
+
+    $keySetting = $providerKey . '_api_key';
+    $apiKey = $cfgRows[$keySetting] ?? '';
+    if (!empty($apiKey) && isEncrypted($apiKey)) $apiKey = decryptValue($apiKey);
+    $systemPrompt = $cfgRows['system_prompt'] ?? DEEPSEEK_SYSTEM_PROMPT;
+
+    if (empty($apiKey)) {
+        workerLog("  Error: API Key de '$providerKey' no configurada. Ve a Configuracion > IA > Traduccion.");
+        markError($logId, "API Key vacia para '$providerKey'");
         return;
     }
-    
+
+    $provider = TranslationProviderFactory::create($providerKey, $apiKey);
+    if (!$provider) {
+        workerLog("  Error: Proveedor '$providerKey' no soportado.");
+        markError($logId, "Proveedor '$providerKey' no soportado");
+        return;
+    }
+
+    // Si no hay modelo definido, auto-seleccionar el primero recomendado de la API
+    if (empty($model)) {
+        $available = $provider->listModels();
+        foreach ($available as $m) {
+            if (!empty($m['is_recommended'])) {
+                $model = $m['id'];
+                break;
+            }
+        }
+        if (empty($model)) {
+            $model = $available[0]['id'] ?? '';
+        }
+        if (empty($model)) {
+            workerLog("  Error: No se pudo determinar un modelo para '$providerKey'.");
+            markError($logId, "Sin modelo para '$providerKey'");
+            return;
+        }
+        workerLog("  Modelo auto-seleccionado: $model");
+    }
+
     $results = [];
     $total = count($chunks);
-    
+
     for ($i = 0; $i < $total; $i++) {
         workerLog("  Chunk ".($i+1)."/$total...");
-        $req = ['model'=>'deepseek-chat','messages'=>[['role'=>'system','content'=>$dsPrompt],['role'=>'user','content'=>implode("\n\n",$chunks[$i])]],'temperature'=>0.3];
-        $ch = curl_init('https://api.deepseek.com/chat/completions');
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER=>true,CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>json_encode($req),CURLOPT_HTTPHEADER=>['Content-Type: application/json','Authorization: Bearer '.$dsKey],CURLOPT_CONNECTTIMEOUT=>15,CURLOPT_TIMEOUT=>300]);
-        $resp = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $cerr = curl_error($ch);
-        curl_close($ch);
-        if ($cerr) { workerLog("  Error DeepSeek: $cerr"); markError($logId, "DeepSeek: $cerr"); return; }
-        if ($code >= 400) { $e = json_decode($resp,true); $msg = $e['error']['message']??$resp; workerLog("  Error DeepSeek HTTP $code: $msg"); markError($logId, "DeepSeek HTTP $code: $msg"); return; }
-        
-        $d = json_decode($resp,true);
-        $t = $d['choices'][0]['message']['content'] ?? null;
-        if (!$t) { workerLog("  Error: Resp vacia"); markError($logId, "Resp vacia chunk ".($i+1)); return; }
+        try {
+            $out = $provider->translate($model, $systemPrompt, implode("\n\n", $chunks[$i]));
+        } catch (Exception $e) {
+            workerLog("  Error $providerKey: ".$e->getMessage());
+            markError($logId, "$providerKey: ".$e->getMessage());
+            return;
+        }
+        $t = $out['content'] ?? '';
+        if ($t === '') {
+            workerLog("  Error: Resp vacia");
+            markError($logId, "Resp vacia chunk ".($i+1));
+            return;
+        }
         
         $lines = explode("\n", str_replace("\r\n","\n",$t));
         $clean = []; $in = false;
@@ -351,7 +385,10 @@ function doTrans(int $taskId, string $payloadJson): void {
     } else {
         $pdo->prepare("UPDATE episodes SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
     }
-    if ($logId) $pdo->prepare("UPDATE translation_log SET status='completed',finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$logId]);
+    if ($logId) {
+        $upd = $pdo->prepare("UPDATE translation_log SET status='completed', finished_at=CURRENT_TIMESTAMP, provider=?, model=? WHERE id=?");
+        $upd->execute([$providerKey, $model, $logId]);
+    }
     $pdo->prepare("DELETE FROM translation_jobs WHERE job_id=?")->execute([$jobId]);
     $pdo->commit();
     $pdo = null;

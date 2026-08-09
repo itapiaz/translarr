@@ -152,6 +152,33 @@ try {
         finished_at DATETIME
     )");
 
+    // Caché de modelos disponibles por proveedor de IA
+    $pdo->exec("CREATE TABLE IF NOT EXISTS provider_models (
+        provider TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        capabilities TEXT,
+        is_recommended INTEGER DEFAULT 0,
+        is_selectable INTEGER DEFAULT 1,
+        raw_data TEXT,
+        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (provider, model_id)
+    )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS provider_model_sync (
+        provider TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        message TEXT,
+        fetched_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
+    // Columnas para registrar proveedor/modelo en el historial de traducciones
+    foreach (['provider', 'model', 'input_tokens', 'output_tokens'] as $col) {
+        try {
+            $pdo->exec("ALTER TABLE translation_log ADD COLUMN $col TEXT");
+        } catch (Exception $e) {
+        }
+    }
+
     $stmt = $pdo->query("SELECT COUNT(*) FROM users");
     if ($stmt->fetchColumn() == 0) {
         $pwd = password_hash('admin', PASSWORD_DEFAULT);
@@ -168,6 +195,11 @@ try {
             ('radarr_api_key', ''),
             ('radarr_enabled', '0'),
             ('deepseek_api_key', ''),
+            ('gemini_api_key', ''),
+            ('openai_api_key', ''),
+            ('mistral_api_key', ''),
+            ('translation_provider', 'deepseek'),
+            ('translation_model', ''),
             ('chunk_size', '50'),
             ('path_mapping_movies_from', ''),
             ('path_mapping_movies_to', ''),
@@ -192,6 +224,9 @@ try {
     $rawSonarrApiKey = $settings['sonarr_api_key'] ?? '';
     $rawRadarrApiKey = $settings['radarr_api_key'] ?? '';
     $rawDeepseekApiKey = $settings['deepseek_api_key'] ?? '';
+    $rawGeminiApiKey = $settings['gemini_api_key'] ?? '';
+    $rawOpenaiApiKey = $settings['openai_api_key'] ?? '';
+    $rawMistralApiKey = $settings['mistral_api_key'] ?? '';
 
     $sonarrApiKeyDecrypted = isEncrypted($rawSonarrApiKey)
         ? decryptValue($rawSonarrApiKey)
@@ -202,6 +237,15 @@ try {
     $deepseekApiKeyDecrypted = isEncrypted($rawDeepseekApiKey)
         ? decryptValue($rawDeepseekApiKey)
         : $rawDeepseekApiKey;
+    $geminiApiKeyDecrypted = isEncrypted($rawGeminiApiKey)
+        ? decryptValue($rawGeminiApiKey)
+        : $rawGeminiApiKey;
+    $openaiApiKeyDecrypted = isEncrypted($rawOpenaiApiKey)
+        ? decryptValue($rawOpenaiApiKey)
+        : $rawOpenaiApiKey;
+    $mistralApiKeyDecrypted = isEncrypted($rawMistralApiKey)
+        ? decryptValue($rawMistralApiKey)
+        : $rawMistralApiKey;
 
     define('SONARR_URL', rtrim($settings['sonarr_url'] ?? '', '/'));
     define('SONARR_API_KEY', $sonarrApiKeyDecrypted);
@@ -210,8 +254,13 @@ try {
     define('RADARR_API_KEY', $radarrApiKeyDecrypted);
     define('RADARR_ENABLED', ($settings['radarr_enabled'] ?? '0') === '1');
     define('DEEPSEEK_API_KEY', $deepseekApiKeyDecrypted);
+    define('GEMINI_API_KEY', $geminiApiKeyDecrypted);
+    define('OPENAI_API_KEY', $openaiApiKeyDecrypted);
+    define('MISTRAL_API_KEY', $mistralApiKeyDecrypted);
     define('CHUNK_SIZE', (int) ($settings['chunk_size'] ?? 50));
     define('DEEPSEEK_SYSTEM_PROMPT', $settings['system_prompt'] ?? '');
+    define('TRANSLATION_PROVIDER', $settings['translation_provider'] ?? 'deepseek');
+    define('TRANSLATION_MODEL', $settings['translation_model'] ?? '');
 
     define('PATH_MAPPING_MOVIES_FROM', $settings['path_mapping_movies_from'] ?? '');
     define('PATH_MAPPING_MOVIES_TO', $settings['path_mapping_movies_to'] ?? '');
@@ -227,6 +276,14 @@ try {
         'radarr_url' => '',
         'radarr_api_key' => '',
         'radarr_enabled' => '0',
+        'deepseek_api_key' => '',
+        'gemini_api_key' => '',
+        'openai_api_key' => '',
+        'mistral_api_key' => '',
+        'translation_provider' => 'deepseek',
+        'translation_model' => '',
+        'system_prompt' => '',
+        'chunk_size' => '50',
         'auto_scan_enabled' => '1',
         'scan_interval_minutes' => '60',
     ];

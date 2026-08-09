@@ -72,28 +72,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $status = "danger";
         }
     } elseif (isset($_POST['form']) && $_POST['form'] === 'ai') {
-        // === FORMULARIO 2: DeepSeek AI ===
+        // === FORMULARIO 2: IA / Traducción (multi-proveedor) ===
         rateLimitRequire('settings_save', 10, 60);
-        
-        $rawDeepseekApiKey = trim($_POST['deepseek_api_key'] ?? '');
+
         $systemPrompt = trim($_POST['system_prompt'] ?? '');
         $chunkSize = trim($_POST['chunk_size'] ?? '50');
-        
-        $storedDeepseekApiKey = $currentSettings['deepseek_api_key'] ?? '';
-        if (isEncrypted($storedDeepseekApiKey)) {
-            $decryptedStored = decryptValue($storedDeepseekApiKey);
-            $deepseekApiKeyChanged = ($rawDeepseekApiKey !== $decryptedStored);
-        } else {
-            $deepseekApiKeyChanged = ($rawDeepseekApiKey !== $storedDeepseekApiKey);
+        $provider = in_array($_POST['translation_provider'] ?? '', ['deepseek', 'gemini', 'openai', 'mistral'], true)
+            ? $_POST['translation_provider']
+            : 'deepseek';
+        $model = trim($_POST['translation_model'] ?? '');
+
+        // Guardar cada API key (conservando la cifrada si no cambió)
+        $keys = ['deepseek', 'gemini', 'openai', 'mistral'];
+        $storedKeys = [];
+        foreach ($keys as $k) {
+            $raw = trim($_POST[$k . '_api_key'] ?? '');
+            $stored = $currentSettings[$k . '_api_key'] ?? '';
+            $storedDecrypted = (!empty($stored) && isEncrypted($stored)) ? decryptValue($stored) : $stored;
+            $storedKeys[$k] = ($raw !== '' && $raw !== $storedDecrypted)
+                ? encryptValue($raw)
+                : $stored;
         }
-        $deepseekApiKey = ($deepseekApiKeyChanged && !empty($rawDeepseekApiKey))
-            ? encryptValue($rawDeepseekApiKey)
-            : $storedDeepseekApiKey;
-        
+
         try {
             $stmt = $pdo->prepare("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)");
             $pdo->beginTransaction();
-            $stmt->execute(['deepseek_api_key', $deepseekApiKey]);
+            foreach ($keys as $k) {
+                $stmt->execute([$k . '_api_key', $storedKeys[$k]]);
+            }
+            $stmt->execute(['translation_provider', $provider]);
+            $stmt->execute(['translation_model', $model]);
             $stmt->execute(['system_prompt', $systemPrompt]);
             $stmt->execute(['chunk_size', $chunkSize]);
             $pdo->commit();
@@ -131,6 +139,20 @@ $currentDeepseekApiKeyRaw = $currentSettings['deepseek_api_key'] ?? '';
 $currentDeepseekApiKey = (!empty($currentDeepseekApiKeyRaw) && isEncrypted($currentDeepseekApiKeyRaw))
     ? decryptValue($currentDeepseekApiKeyRaw)
     : $currentDeepseekApiKeyRaw;
+$currentGeminiApiKeyRaw = $currentSettings['gemini_api_key'] ?? '';
+$currentGeminiApiKey = (!empty($currentGeminiApiKeyRaw) && isEncrypted($currentGeminiApiKeyRaw))
+    ? decryptValue($currentGeminiApiKeyRaw)
+    : $currentGeminiApiKeyRaw;
+$currentOpenaiApiKeyRaw = $currentSettings['openai_api_key'] ?? '';
+$currentOpenaiApiKey = (!empty($currentOpenaiApiKeyRaw) && isEncrypted($currentOpenaiApiKeyRaw))
+    ? decryptValue($currentOpenaiApiKeyRaw)
+    : $currentOpenaiApiKeyRaw;
+$currentMistralApiKeyRaw = $currentSettings['mistral_api_key'] ?? '';
+$currentMistralApiKey = (!empty($currentMistralApiKeyRaw) && isEncrypted($currentMistralApiKeyRaw))
+    ? decryptValue($currentMistralApiKeyRaw)
+    : $currentMistralApiKeyRaw;
+$currentTranslationProvider = $currentSettings['translation_provider'] ?? 'deepseek';
+$currentTranslationModel = $currentSettings['translation_model'] ?? '';
 $currentSystemPrompt = $currentSettings['system_prompt'] ?? '';
 $currentChunkSize = $currentSettings['chunk_size'] ?? '50';
 $currentPathMappingMoviesFrom = $currentSettings['path_mapping_movies_from'] ?? '';
@@ -158,7 +180,7 @@ $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
     <div class="col-md-3 mb-4">
         <div class="nav flex-column nav-pills glass-card p-3" id="settings-tabs" role="tablist" aria-orientation="vertical">
             <button class="nav-link active text-start mb-2" id="tab-server" data-bs-toggle="pill" data-bs-target="#pane-server" type="button" role="tab" style="color: #fff;"><i class="fa fa-server me-2 text-info"></i> Sonarr / Radarr</button>
-            <button class="nav-link text-start mb-2" id="tab-ai" data-bs-toggle="pill" data-bs-target="#pane-ai" type="button" role="tab" style="color: #fff;"><i class="fa fa-bolt me-2 text-warning"></i> DeepSeek AI</button>
+            <button class="nav-link text-start mb-2" id="tab-ai" data-bs-toggle="pill" data-bs-target="#pane-ai" type="button" role="tab" style="color: #fff;"><i class="fa fa-bolt me-2 text-warning"></i> IA / Traducción</button>
             <button class="nav-link text-start mb-2" id="tab-tasks" data-bs-toggle="pill" data-bs-target="#pane-tasks" type="button" role="tab" style="color: #fff;"><i class="fa fa-clock-o me-2 text-success"></i> Tareas Programadas</button>
             <button class="nav-link text-start mb-4" id="tab-security" data-bs-toggle="pill" data-bs-target="#pane-security" type="button" role="tab" style="color: #fff;"><i class="fa fa-lock me-2 text-danger"></i> Seguridad</button>
             <a href="logs.php" class="nav-link text-start border border-info text-info mt-2" style="background: rgba(0, 242, 254, 0.05);"><i class="fa fa-terminal me-2"></i> Logs del Sistema</a>
@@ -264,24 +286,60 @@ $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
                     </form>
                 </div>
 
-                <!-- PANE 2: DEEPSEEK AI -->
+                <!-- PANE 2: IA / TRADUCCIÓN (multi-proveedor) -->
                 <div class="tab-pane fade" id="pane-ai" role="tabpanel">
                     <form method="POST" action="settings.php">
                         <input type="hidden" name="form" value="ai">
                         <?= csrf_field() ?>
                     <div class="card glass-card mb-4">
                         <div class="card-body p-4">
-                            <h4 class="mb-4 text-warning"><i class="fa fa-bolt"></i> Conexión con DeepSeek AI</h4>
+                            <h4 class="mb-4 text-warning"><i class="fa fa-bolt"></i> IA / Traducción</h4>
 
                             <div class="mb-4">
-                                <label for="deepseek_api_key" class="form-label">API Key de DeepSeek</label>
-                                <div class="input-group">
-                                    <input type="password" class="form-control" id="deepseek_api_key" name="deepseek_api_key"
-                                           value="<?= htmlspecialchars($currentDeepseekApiKey) ?>" 
-                                           placeholder="sk-...">
-                                    <button class="btn btn-outline-secondary toggle-password" type="button" data-target="deepseek_api_key"><i class="fa fa-eye"></i></button>
+                                <label for="translation_provider" class="form-label">Proveedor de traducción</label>
+                                <select class="form-select" id="translation_provider" name="translation_provider">
+                                    <?php foreach (['deepseek' => 'DeepSeek', 'gemini' => 'Google Gemini', 'openai' => 'OpenAI', 'mistral' => 'Mistral AI'] as $pk => $pl): ?>
+                                        <option value="<?= $pk ?>" <?= $currentTranslationProvider === $pk ? 'selected' : '' ?>><?= $pl ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text text-muted">El proveedor y modelo se congelan en cada tarea al crearla.</div>
+                            </div>
+
+                            <?php foreach (['deepseek', 'gemini', 'openai', 'mistral'] as $pk): ?>
+                                <?php $cur = $currentSettings[$pk . '_api_key'] ?? ''; ?>
+                                <?php $curDecrypted = (!empty($cur) && isEncrypted($cur)) ? decryptValue($cur) : $cur; ?>
+                                <div class="mb-4 provider-key" data-provider="<?= $pk ?>" <?= $currentTranslationProvider !== $pk ? 'style="display:none"' : '' ?>>
+                                    <label for="<?= $pk ?>_api_key" class="form-label">API Key <?= ['deepseek' => 'DeepSeek', 'gemini' => 'Google Gemini', 'openai' => 'OpenAI', 'mistral' => 'Mistral AI'][$pk] ?></label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="<?= $pk ?>_api_key" name="<?= $pk ?>_api_key"
+                                               value="<?= htmlspecialchars($curDecrypted) ?>"
+                                               placeholder="Clave de la API...">
+                                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="<?= $pk ?>_api_key"><i class="fa fa-eye"></i></button>
+                                    </div>
+                                    <div class="form-text text-muted">Se almacena cifrada. Solo se usa en servidor.</div>
                                 </div>
-                                <div class="form-text text-muted">La API Key de tu cuenta en DeepSeek para procesar las traducciones.</div>
+                            <?php endforeach; ?>
+
+                            <div class="mb-4">
+                                <label for="translation_model" class="form-label">Modelo</label>
+                                <div class="input-group">
+                                    <select class="form-select" id="translation_model" name="translation_model">
+                                        <?php if ($currentTranslationModel !== ''): ?>
+                                            <option value="<?= htmlspecialchars($currentTranslationModel) ?>" selected><?= htmlspecialchars($currentTranslationModel) ?></option>
+                                        <?php endif; ?>
+                                        <option value="">(auto-seleccionar al traducir)</option>
+                                        <?php
+                                        $stmtM = $pdo->prepare("SELECT model_id, display_name, is_selectable FROM provider_models WHERE provider=? ORDER BY is_recommended DESC, display_name ASC");
+                                        $stmtM->execute([$currentTranslationProvider]);
+                                        foreach ($stmtM->fetchAll(PDO::FETCH_ASSOC) as $m):
+                                        ?>
+                                            <option value="<?= htmlspecialchars($m['model_id']) ?>" <?= $currentTranslationModel === $m['model_id'] ? 'selected' : '' ?>><?= htmlspecialchars($m['display_name']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="button" class="btn btn-outline-info" id="btn-sync-models"><i class="fa fa-refresh me-1"></i> Actualizar</button>
+                                    <button type="button" class="btn btn-outline-success" id="btn-test-model"><i class="fa fa-plug me-1"></i> Probar</button>
+                                </div>
+                                <div class="form-text text-muted" id="ai-model-feedback">Los modelos se cargan desde la API del proveedor. Usa "Actualizar" para refrescar la lista.</div>
                             </div>
 
                             <div class="mb-4">
@@ -300,7 +358,7 @@ $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
                         </div>
                     </div>
                     <div class="text-end mb-4">
-                        <button type="submit" class="btn btn-gradient btn-lg w-100 shadow"><i class="fa fa-save me-2"></i> Guardar DeepSeek AI</button>
+                        <button type="submit" class="btn btn-gradient btn-lg w-100 shadow"><i class="fa fa-save me-2"></i> Guardar IA / Traducción</button>
                     </div>
                     </form>
                 </div>
@@ -474,6 +532,122 @@ document.querySelectorAll('.btn-test-conn').forEach(btn => {
             });
     });
 });
+
+// ===== IA / TRADUCCIÓN: cambio de proveedor, sincronizar y probar modelos =====
+const csrfInput = document.querySelector('input[name="_csrf_token"]');
+const csrfVal = () => (csrfInput ? csrfInput.value : '');
+
+function uiAiFeedback(msg, type) {
+    const el = document.getElementById('ai-model-feedback');
+    if (!el) return;
+    const cls = type === 'ok' ? 'text-success' : (type === 'err' ? 'text-danger' : 'text-muted');
+    el.innerHTML = '<span class="' + cls + '">' + msg + '</span>';
+}
+
+// Mostrar/ocultar el campo de API key según el proveedor seleccionado
+const providerSelect = document.getElementById('translation_provider');
+if (providerSelect) {
+    providerSelect.addEventListener('change', function () {
+        const pk = this.value;
+        document.querySelectorAll('.provider-key').forEach(el => {
+            el.style.display = el.getAttribute('data-provider') === pk ? '' : 'none';
+        });
+        // Recargar modelos del proveedor seleccionado desde caché
+        loadCachedModels(pk);
+    });
+}
+
+function loadCachedModels(pk) {
+    const modelSel = document.getElementById('translation_model');
+    if (!modelSel) return;
+    const body = new URLSearchParams({ action: 'list', provider: pk, _csrf_token: csrfVal() });
+    fetch('ajax_ai_models.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
+    })
+        .then(r => r.json())
+        .then(data => {
+            // Conservar la opción actualmente seleccionada
+            const current = modelSel.value;
+            modelSel.innerHTML = '';
+            if (data.models && data.models.length > 0) {
+                data.models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.model_id;
+                    opt.textContent = m.display_name;
+                    if (m.model_id === current) opt.selected = true;
+                    modelSel.appendChild(opt);
+                });
+            } else {
+                const opt = document.createElement('option');
+                opt.value = current || '';
+                opt.textContent = current || '(auto-seleccionar al traducir)';
+                opt.selected = true;
+                modelSel.appendChild(opt);
+            }
+            if (data.sync && data.sync.fetched_at) {
+                uiAiFeedback('Última actualización: ' + data.sync.fetched_at + '.', 'ok');
+            }
+        })
+        .catch(() => uiAiFeedback('No se pudo cargar los modelos.', 'err'));
+}
+
+// Botón "Actualizar" modelos
+const btnSync = document.getElementById('btn-sync-models');
+if (btnSync) {
+    btnSync.addEventListener('click', function () {
+        const pk = providerSelect.value;
+        this.disabled = true;
+        uiAiFeedback('Actualizando modelos desde la API...', '');
+        const body = new URLSearchParams({ action: 'sync', provider: pk, _csrf_token: csrfVal() });
+        fetch('ajax_ai_models.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    uiAiFeedback(data.message, 'ok');
+                    loadCachedModels(pk);
+                } else {
+                    uiAiFeedback(data.message || 'Error al actualizar modelos.', 'err');
+                    if (data.models && data.models.length > 0) loadCachedModels(pk);
+                }
+            })
+            .catch(() => uiAiFeedback('Error de red al actualizar modelos.', 'err'))
+            .finally(() => { this.disabled = false; });
+    });
+}
+
+// Botón "Probar" el modelo seleccionado
+const btnTest = document.getElementById('btn-test-model');
+if (btnTest) {
+    btnTest.addEventListener('click', function () {
+        const pk = providerSelect.value;
+        const model = document.getElementById('translation_model').value;
+        if (!model) {
+            uiAiFeedback('Selecciona un modelo para probar.', 'err');
+            return;
+        }
+        this.disabled = true;
+        uiAiFeedback('Probando modelo ' + model + '...', '');
+        const body = new URLSearchParams({ provider: pk, model: model, _csrf_token: csrfVal() });
+        fetch('ajax_ai_test.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        })
+            .then(r => r.json())
+            .then(data => {
+                uiAiFeedback(data.message || 'Resultado de la prueba.', data.status === 'success' ? 'ok' : 'err');
+            })
+            .catch(() => uiAiFeedback('Error de red al probar el modelo.', 'err'))
+            .finally(() => { this.disabled = false; });
+    });
+}
+
 // Explorador Local
 const browserModal = new bootstrap.Modal(document.getElementById('browserModal'));
 

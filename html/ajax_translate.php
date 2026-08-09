@@ -141,7 +141,7 @@ try {
 
         $logId = $pdo->lastInsertId();
 
-        // Encolar tarea de traducción en background
+        // Encolar tarea de traducción en background (congelar proveedor y modelo)
         $payload = json_encode([
             'job_id'   => $jobId,
             'log_id'   => $logId,
@@ -152,7 +152,9 @@ try {
             'media_title' => $mediaTitle,
             'season'   => $season,
             'episode'  => $episode,
-            'total_chunks' => count($chunks)
+            'total_chunks' => count($chunks),
+            'provider' => defined('TRANSLATION_PROVIDER') ? TRANSLATION_PROVIDER : 'deepseek',
+            'model'    => defined('TRANSLATION_MODEL') ? TRANSLATION_MODEL : '',
         ]);
         $pdo->prepare("INSERT INTO background_tasks (type, status, payload, created_at) VALUES ('translate', 'pending', ?, CURRENT_TIMESTAMP)")
             ->execute([$payload]);
