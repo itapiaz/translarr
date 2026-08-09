@@ -17,11 +17,6 @@ $epId    = $_GET['ep_id']    ?? null;
 $type    = $_GET['type']     ?? 'series';
 $seriesId = $_GET['series_id'] ?? null;
 
-if (!$epId) {
-    echo json_encode(['html' => '<p class="text-danger small mb-0">ID no proporcionado.</p>']);
-    exit;
-}
-
 // ============================================================
 // Acción: estado masivo de una serie (un solo request)
 // ============================================================
@@ -113,6 +108,11 @@ if ($action === 'movie_status') {
         'english_path' => $en ? $en['path'] : null,
         'translation_status' => $translationStatus,
     ]);
+    exit;
+}
+
+if (!$epId) {
+    echo json_encode(['html' => '<p class="text-danger small mb-0">ID no proporcionado.</p>']);
     exit;
 }
 
