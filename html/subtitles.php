@@ -57,13 +57,11 @@ $overview = $itemData['overview'] ?? 'Sin descripción disponible. Por favor, ej
 $folderPath = $itemData['folder_path'] ?? 'Ruta no disponible. Por favor, realiza un escaneo.';
 $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
 ?>
-<div class="d-flex justify-content-end mb-2">
-    <a href="javascript:history.back()" class="btn btn-outline-light btn-sm"><i class="fa fa-arrow-left"></i> Volver</a>
-</div>
 <input type="hidden" id="monitor-csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
 
 <!-- Barra de acciones (tipo Sonarr/Radarr) -->
 <div class="d-flex flex-wrap align-items-center gap-2 mb-4">
+    <div class="d-flex flex-wrap align-items-center gap-2">
     <?php if ($type === 'series'): ?>
         <button class="btn btn-sm btn-outline-info" onclick="confirmTranslateAll('<?= htmlspecialchars($id) ?>', '<?= htmlspecialchars($type) ?>')" <?= $isIgnored ? 'disabled' : '' ?> title="Traducir todos los episodios pendientes">
             <i class="fa fa-language me-1"></i> Traducir toda la serie
@@ -91,6 +89,9 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
             <i class="fa fa-external-link me-1"></i> Ver en TMDB
         </a>
     <?php endif; ?>
+    </div>
+
+    <a href="javascript:history.back()" class="btn btn-outline-light btn-sm ms-auto"><i class="fa fa-arrow-left"></i> Volver</a>
 </div>
 
 <div class="card glass-card mb-4" style="background: rgba(20,20,25,0.7); border: 1px solid rgba(255,255,255,0.1);">
@@ -120,21 +121,29 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
 <?php if ($type === 'movies' && $movieRow): ?>
     <!-- ===== PELÍCULA ===== -->
     <div class="card glass-card mb-4">
-        <div class="card-body">
-            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-                <div>
-                    <h5 class="mb-1 text-muted"><i class="fa fa-closed-captioning me-2"></i>Subtítulos</h5>
-                    <div class="subs-badges">
-                        <span class="badge es-badge me-1 bg-secondary">ES</span>
-                        <span class="badge en-badge bg-secondary">EN</span>
-                    </div>
-                </div>
-                <div class="text-end">
-                    <h5 class="mb-1 text-muted"><i class="fa fa-bolt me-2"></i>Acciones</h5>
-                    <button type="button" id="movie-translate-btn" class="btn btn-sm btn-outline-info translate-icon-btn" disabled title="Cargando...">
-                        <i class="fa fa-language"></i>
-                    </button>
-                </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-sm align-middle mb-0" style="font-size:0.9rem;">
+                    <thead>
+                        <tr class="text-muted small">
+                            <th style="width:150px;">Subtítulos</th>
+                            <th class="text-end" style="width:90px;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr data-movie-id="<?= htmlspecialchars($id) ?>">
+                            <td class="subs-badges">
+                                <span class="badge es-badge me-1 bg-secondary">ES</span>
+                                <span class="badge en-badge bg-secondary">EN</span>
+                            </td>
+                            <td class="text-end">
+                                <button type="button" id="movie-translate-btn" class="btn btn-sm btn-outline-info translate-icon-btn" disabled title="Cargando...">
+                                    <i class="fa fa-language"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
