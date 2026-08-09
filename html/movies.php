@@ -61,6 +61,8 @@ $lastUpdate = $pdo->query("
                             $title = htmlspecialchars($movie['title']);
                             $year = htmlspecialchars($movie['year']);
                             $poster  = $movie['poster_url'] ?: 'https://via.placeholder.com/150x225?text=No+Poster';
+                            $overview = htmlspecialchars($movie['overview'] ?? '');
+                            $tmdbId = htmlspecialchars($movie['tmdb_id'] ?? '');
                             $mediaId = $movie['id'];
                         ?>
                         <tr style="cursor: pointer;" onclick="window.location.href='subtitles.php?type=movies&id=<?= $mediaId ?>'" class="table-row-hover movie-row" data-title="<?= strtolower($title) ?>">
@@ -70,8 +72,16 @@ $lastUpdate = $pdo->query("
                             <td>
                                 <h5 class="mb-1"><?= $title ?></h5>
                                 <span class="text-muted"><i class="fa fa-calendar"></i> <?= $year ?></span>
+                                <?php if ($overview): ?>
+                                    <div class="text-muted small mt-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"><?= $overview ?></div>
+                                <?php endif; ?>
                             </td>
-                            <td class="text-end pe-4 text-muted">
+                            <td class="text-end pe-4 text-muted" style="vertical-align:middle;">
+                                <?php if ($tmdbId): ?>
+                                    <a href="https://www.themoviedb.org/movie/<?= urlencode($tmdbId) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TMDB" class="btn btn-sm btn-outline-info me-2" onclick="event.stopPropagation();" style="text-decoration:none;">
+                                        <i class="fa fa-external-link me-1"></i>TMDB
+                                    </a>
+                                <?php endif; ?>
                                 <i class="fa fa-chevron-right"></i>
                             </td>
                         </tr>

@@ -61,6 +61,8 @@ $lastUpdate = $pdo->query("
                             $title = htmlspecialchars($s['title']);
                             $year = htmlspecialchars($s['year']);
                             $poster = $s['poster_url'] ?: 'https://via.placeholder.com/150x225?text=No+Poster';
+                            $overview = htmlspecialchars($s['overview'] ?? '');
+                            $tvdbId = htmlspecialchars($s['tvdb_id'] ?? '');
                             $mediaId = $s['id'];
                         ?>
                         <tr style="cursor: pointer;" onclick="window.location.href='subtitles.php?type=series&id=<?= $mediaId ?>'" class="table-row-hover series-row" data-title="<?= strtolower($title) ?>">
@@ -70,8 +72,16 @@ $lastUpdate = $pdo->query("
                             <td>
                                 <h5 class="mb-1"><?= $title ?></h5>
                                 <span class="text-muted"><i class="fa fa-calendar"></i> <?= $year ?></span>
+                                <?php if ($overview): ?>
+                                    <div class="text-muted small mt-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"><?= $overview ?></div>
+                                <?php endif; ?>
                             </td>
-                            <td class="text-end pe-4 text-muted">
+                            <td class="text-end pe-4 text-muted" style="vertical-align:middle;">
+                                <?php if ($tvdbId): ?>
+                                    <a href="https://thetvdb.com/series/<?= urlencode($tvdbId) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TheTVDB" class="btn btn-sm btn-outline-info me-2" onclick="event.stopPropagation();" style="text-decoration:none;">
+                                        <i class="fa fa-external-link me-1"></i>TheTVDB
+                                    </a>
+                                <?php endif; ?>
                                 <i class="fa fa-chevron-right"></i>
                             </td>
                         </tr>
