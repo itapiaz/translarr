@@ -57,11 +57,29 @@ $overview = $itemData['overview'] ?? 'Sin descripción disponible. Por favor, ej
 $folderPath = $itemData['folder_path'] ?? 'Ruta no disponible. Por favor, realiza un escaneo.';
 $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
 ?>
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-2">
     <h2 class="mb-0 text-muted"><i class="fa fa-closed-captioning text-primary me-2"></i> Gestión de Subtítulos</h2>
     <a href="javascript:history.back()" class="btn btn-outline-light btn-sm"><i class="fa fa-arrow-left"></i> Volver</a>
 </div>
 <input type="hidden" id="monitor-csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
+
+<!-- Barra de acciones (tipo Sonarr/Radarr) -->
+<div class="d-flex flex-wrap align-items-center gap-2 mb-4">
+    <?php if ($type === 'series'): ?>
+        <button class="btn btn-sm btn-outline-info" onclick="confirmTranslateAll('<?= htmlspecialchars($id) ?>', '<?= htmlspecialchars($type) ?>')" <?= $isIgnored ? 'disabled' : '' ?> title="Traducir todos los episodios pendientes">
+            <i class="fa fa-language me-1"></i> Traducir toda la serie
+        </button>
+    <?php endif; ?>
+    <?php if ($isIgnored): ?>
+        <button type="button" class="btn btn-sm btn-outline-success" onclick="toggleMonitor('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'monitor')" title="Volver a monitorizar">
+            <i class="fa fa-play me-1"></i> Volver a monitorizar
+        </button>
+    <?php else: ?>
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="toggleMonitor('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'ignore')" title="No monitorizar">
+            <i class="fa fa-ban me-1"></i> No monitorizar
+        </button>
+    <?php endif; ?>
+</div>
 
 <div class="card glass-card mb-4" style="background: rgba(20,20,25,0.7); border: 1px solid rgba(255,255,255,0.1);">
     <div class="card-body d-flex flex-column flex-md-row gap-4">
@@ -100,30 +118,11 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
             <p class="text-light text-opacity-75 mb-0" style="font-size: 0.95rem; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; text-align: justify;">
                 <?= htmlspecialchars($overview) ?>
             </p>
-            <?php if ($type === 'series'): ?>
-                <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
-                    <button class="btn btn-sm btn-outline-info" onclick="confirmTranslateAll('<?= htmlspecialchars($id) ?>', '<?= htmlspecialchars($type) ?>')" <?= $isIgnored ? 'disabled' : '' ?>>
-                        <i class="fa fa-language me-1"></i> Traducir toda la serie
-                    </button>
-                    <?php if ($isIgnored): ?>
-                        <span class="badge bg-secondary" title="Serie excluida de la monitorización"><i class="fa fa-pause me-1"></i> Serie no monitorizada</span>
-                    <?php endif; ?>
-                    <small class="text-muted ms-2">Solo episodios con subtítulo en inglés y sin español</small>
+            <?php if ($isIgnored): ?>
+                <div class="mt-3">
+                    <span class="badge bg-secondary" title="Elemento excluido de la monitorización"><i class="fa fa-pause me-1"></i> No monitorizada</span>
                 </div>
             <?php endif; ?>
-            <div class="mt-3">
-                <?php if ($isIgnored): ?>
-                    <span class="badge bg-secondary mb-2" title="Elemento excluido de la monitorización"><i class="fa fa-pause me-1"></i> No monitorizada</span>
-                    <button class="btn btn-sm btn-outline-success d-block" onclick="toggleMonitor('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'monitor')">
-                        <i class="fa fa-play me-1"></i> Volver a monitorizar
-                    </button>
-                <?php else: ?>
-                    <button class="btn btn-sm btn-outline-danger d-block" onclick="toggleMonitor('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'ignore')">
-                        <i class="fa fa-ban me-1"></i> No monitorizar
-                    </button>
-                <?php endif; ?>
-                <small class="text-muted d-block mt-1">No aparecerá como pendiente ni se encolarán traducciones automáticas.</small>
-            </div>
         </div>
     </div>
 </div>
