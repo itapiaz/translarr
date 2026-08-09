@@ -79,6 +79,19 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
             <i class="fa fa-ban me-1"></i> No monitorizar
         </button>
     <?php endif; ?>
+    <?php
+        $tvdbId = $itemData['tvdb_id'] ?? '';
+        $tmdbId = $itemData['tmdb_id'] ?? '';
+    ?>
+    <?php if ($type === 'series' && $tvdbId): ?>
+        <a class="btn btn-sm btn-outline-info" href="https://thetvdb.com/series/<?= htmlspecialchars(urlencode($tvdbId)) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TheTVDB">
+            <i class="fa fa-external-link me-1"></i> Ver en TheTVDB
+        </a>
+    <?php elseif ($type === 'movies' && $tmdbId): ?>
+        <a class="btn btn-sm btn-outline-info" href="https://www.themoviedb.org/movie/<?= htmlspecialchars(urlencode($tmdbId)) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TMDB">
+            <i class="fa fa-external-link me-1"></i> Ver en TMDB
+        </a>
+    <?php endif; ?>
 </div>
 
 <div class="card glass-card mb-4" style="background: rgba(20,20,25,0.7); border: 1px solid rgba(255,255,255,0.1);">
@@ -98,23 +111,6 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
             <div class="text-info mb-3 small font-monospace bg-dark p-2 rounded d-inline-block border border-info border-opacity-25">
                 <i class="fa fa-folder-open me-2"></i><?= htmlspecialchars($folderPath) ?>
             </div>
-            <?php
-                $tvdbId = $itemData['tvdb_id'] ?? '';
-                $tmdbId = $itemData['tmdb_id'] ?? '';
-            ?>
-            <?php if (($type === 'series' && $tvdbId) || ($type === 'movies' && $tmdbId)): ?>
-                <div class="mb-3">
-                    <?php if ($type === 'series' && $tvdbId): ?>
-                        <a class="btn btn-sm btn-outline-info me-2" href="https://thetvdb.com/series/<?= htmlspecialchars(urlencode($tvdbId)) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TheTVDB">
-                            <i class="fa fa-external-link me-1"></i> Ver en TheTVDB
-                        </a>
-                    <?php elseif ($type === 'movies' && $tmdbId): ?>
-                        <a class="btn btn-sm btn-outline-info me-2" href="https://www.themoviedb.org/movie/<?= htmlspecialchars(urlencode($tmdbId)) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TMDB">
-                            <i class="fa fa-external-link me-1"></i> Ver en TMDB
-                        </a>
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
             <p class="text-light text-opacity-75 mb-0" style="font-size: 0.95rem; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; text-align: justify;">
                 <?= htmlspecialchars($overview) ?>
             </p>
