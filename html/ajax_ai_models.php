@@ -26,12 +26,17 @@ if (!in_array($providerKey, ['deepseek', 'gemini', 'openai', 'mistral'], true)) 
     exit;
 }
 
-$keySetting = $providerKey . '_api_key';
-$stmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key=?");
-$stmt->execute([$keySetting]);
-$apiKey = (string) $stmt->fetchColumn();
-if (!empty($apiKey) && isEncrypted($apiKey)) {
-    $apiKey = decryptValue($apiKey);
+// Usar la API key enviada por el usuario (si la acaba de escribir).
+// Si viene vacía, se usa la que ya está guardada cifrada en SQLite.
+$apiKey = trim($_POST['api_key'] ?? '');
+if ($apiKey === '') {
+    $keySetting = $providerKey . '_api_key';
+    $stmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key=?");
+    $stmt->execute([$keySetting]);
+    $apiKey = (string) $stmt->fetchColumn();
+    if (!empty($apiKey) && isEncrypted($apiKey)) {
+        $apiKey = decryptValue($apiKey);
+    }
 }
 
 if (empty($apiKey)) {

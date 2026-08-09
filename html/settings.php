@@ -608,9 +608,11 @@ const btnSync = document.getElementById('btn-sync-models');
 if (btnSync) {
     btnSync.addEventListener('click', function () {
         const pk = providerSelect.value;
+        const keyInput = document.getElementById(pk + '_api_key');
+        const apiKey = (keyInput ? keyInput.value : '').trim();
         this.disabled = true;
         uiAiFeedback('Actualizando modelos desde la API...', '');
-        const body = new URLSearchParams({ action: 'sync', provider: pk, _csrf_token: csrfVal() });
+        const body = new URLSearchParams({ action: 'sync', provider: pk, api_key: apiKey, _csrf_token: csrfVal() });
         fetch('ajax_ai_models.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -637,13 +639,15 @@ if (btnTest) {
     btnTest.addEventListener('click', function () {
         const pk = providerSelect.value;
         const model = document.getElementById('translation_model').value;
+        const keyInput = document.getElementById(pk + '_api_key');
+        const apiKey = (keyInput ? keyInput.value : '').trim();
         if (!model) {
             uiAiFeedback('Selecciona un modelo para probar.', 'err');
             return;
         }
         this.disabled = true;
         uiAiFeedback('Probando modelo ' + model + '...', '');
-        const body = new URLSearchParams({ provider: pk, model: model, _csrf_token: csrfVal() });
+        const body = new URLSearchParams({ provider: pk, model: model, api_key: apiKey, _csrf_token: csrfVal() });
         fetch('ajax_ai_test.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
