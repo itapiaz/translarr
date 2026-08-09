@@ -91,7 +91,7 @@ function doScanMedia(): string {
 
             $pdo->beginTransaction();
             foreach ($seriesList as $s) {
-                $upsertSeries->execute([$s['id'], $s['title'], $s['year'], $s['tvdbId'], $s['id'], $s['poster'], $s['overview'], $s['path']]);
+                $upsertSeries->execute(['series:' . $s['id'], $s['title'], $s['year'], $s['tvdbId'], $s['id'], $s['poster'], $s['overview'], $s['path']]);
                 $stats['series']++;
             }
             $pdo->commit();
@@ -117,7 +117,7 @@ function doScanMedia(): string {
                         if ($videoPath && is_file($videoPath)) {
                             $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
                         }
-                        $upsertEp->execute([$ep['id'], $s['id'], $ep['title'], (int)$ep['season'], (int)$ep['episode'], $ep['tvdbEpisodeId'], $s['id'], $ep['id'], $videoPath, $s['path'], $hasSpanish]);
+                        $upsertEp->execute(['episode:' . $ep['id'], 'series:' . $s['id'], $ep['title'], (int)$ep['season'], (int)$ep['episode'], $ep['tvdbEpisodeId'], $s['id'], $ep['id'], $videoPath, $s['path'], $hasSpanish]);
                         $stats['episodes']++;
                     }
                     $pdo->commit();
@@ -145,24 +145,36 @@ function doScanMedia(): string {
             $radarr = ArrFactory::radarr($cfg['radarr_url'] ?? '', $radarrKey);
 
             $movies = $radarr->getMovies();
-            $files = $radarr->getMovieFiles();
-
-            $fileByMovie = [];
-            $moviePathById = [];
-            foreach ($movies as $m) $moviePathById[$m['id']] = $m['path'];
-            foreach ($files as $f) {
-                $p = $f['path'];
-                if ($p === '' && $f['relativePath'] !== '') {
-                    $p = rtrim($moviePathById[$f['movieId']] ?? '', '/') . '/' . ltrim($f['relativePath'], '/');
-                }
-                if ($p !== '') $fileByMovie[$f['movieId']] = $p;
-            }
 
             $upsertMovie = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,tmdb_id,radarr_id,poster_url,overview,folder_path,video_path,has_spanish,updated_at) VALUES(?,'movie',?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,tmdb_id=excluded.tmdb_id,radarr_id=excluded.radarr_id,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,video_path=excluded.video_path,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
 
             $pdo->beginTransaction();
             foreach ($movies as $m) {
-                $videoPath = $fileByMovie[$m['id']] ?? '';
+                // 1) Radarr v3 embebe movieFile en el objeto de la película
+                $videoPath = '';
+                $mf = $m['movieFile'] ?? null;
+                if (is_array($mf)) {
+                    $videoPath = $mf['path'] ?? '';
+                    if ($videoPath === '' && !empty($mf['relativePath']) && !empty($m['path'])) {
+                        $videoPath = rtrim($m['path'], '/') . '/' . ltrim($mf['relativePath'], '/');
+                    }
+                }
+                // 2) Fallback: consultar el archivo por movieId (Radarr exige el filtro)
+                if ($videoPath === '') {
+                    try {
+                        $mfList = $radarr->getMovieFiles($m['id']);
+                        if (!empty($mfList[0])) {
+                            $f0 = $mfList[0];
+                            $videoPath = $f0['path'];
+                            if ($videoPath === '' && $f0['relativePath'] !== '' && !empty($m['path'])) {
+                                $videoPath = rtrim($m['path'], '/') . '/' . ltrim($f0['relativePath'], '/');
+                            }
+                        }
+                    } catch (Exception $e) {
+                        // Sin archivo por API; se intentará localmente
+                    }
+                }
+                // 3) Último recurso: buscar un vídeo en la carpeta
                 if ($videoPath === '') {
                     $videoPath = SubtitleScanner::findVideoInFolder($m['path'] ?? '');
                 }
@@ -170,7 +182,7 @@ function doScanMedia(): string {
                 if ($videoPath && is_file($videoPath)) {
                     $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
                 }
-                $upsertMovie->execute([$m['id'], $m['title'], $m['year'], $m['tmdbId'], $m['id'], $m['poster'], $m['overview'], $m['path'], $videoPath, $hasSpanish]);
+                $upsertMovie->execute(['movie:' . $m['id'], $m['title'], $m['year'], $m['tmdbId'], $m['id'], $m['poster'], $m['overview'], $m['path'], $videoPath, $hasSpanish]);
                 $stats['movies']++;
             }
             $pdo->commit();

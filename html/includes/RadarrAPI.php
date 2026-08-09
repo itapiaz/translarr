@@ -15,7 +15,9 @@ class RadarrAPI extends ArrClient {
 
     /**
      * Lista estandarizada de películas:
-     * [['id', 'tmdbId', 'title', 'year', 'overview', 'path', 'poster', 'hasFile', 'movieFileId'], ...]
+     * [['id', 'tmdbId', 'title', 'year', 'overview', 'path', 'poster', 'hasFile', 'movieFileId', 'movieFile'], ...]
+     * 'movieFile' es el objeto embebido que Radarr v3 incluye cuando la película tiene archivo
+     * (contiene id, relativePath y path).
      */
     public function getMovies(): array {
         $resp = $this->request('/movie');
@@ -31,22 +33,23 @@ class RadarrAPI extends ArrClient {
                 'poster' => $this->extractImage($m['images'] ?? [], 'poster'),
                 'hasFile' => !empty($m['hasFile']),
                 'movieFileId' => $m['movieFileId'] ?? null,
+                'movieFile' => $m['movieFile'] ?? null,
             ];
         }
         return $movies;
     }
 
     /**
-     * Archivos de película:
+     * Archivos de película filtrados por movieId (Radarr exige el filtro).
      * [['id', 'movieId', 'path', 'relativePath'], ...]
      */
-    public function getMovieFiles(): array {
-        $resp = $this->request('/moviefile');
+    public function getMovieFiles($movieId): array {
+        $resp = $this->request('/moviefile?movieId=' . (int)$movieId);
         $files = [];
         foreach ($resp as $f) {
             $files[] = [
                 'id' => $f['id'] ?? 0,
-                'movieId' => $f['movieId'] ?? '',
+                'movieId' => $f['movieId'] ?? $movieId,
                 'path' => $f['path'] ?? '',
                 'relativePath' => $f['relativePath'] ?? '',
             ];
