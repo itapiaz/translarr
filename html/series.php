@@ -2,10 +2,11 @@
 // html/series.php
 require_once 'includes/header.php';
 
-// Leer desde la caché de la BD (instantáneo)
+// Leer desde la caché de la BD (instantáneo).
+// Se muestran también las marcadas como "No monitorizar" (con badge) para poder revertirlas.
 $series = $pdo->query("
     SELECT s.* FROM series s
-    WHERE s.is_ignored=0 AND EXISTS (
+    WHERE EXISTS (
         SELECT 1 FROM episodes e
         WHERE e.series_id = s.id AND e.has_file=1
     )
@@ -30,6 +31,7 @@ $lastUpdate = $pdo->query("
         <span class="badge bg-secondary" id="series-count"><?= count($series) ?> Encontradas</span>
     </div>
 </div>
+<input type="hidden" id="monitor-csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
 
 <div class="mb-4">
     <div class="input-group">
@@ -76,13 +78,26 @@ $lastUpdate = $pdo->query("
                                 <img src="<?= $poster ?>" alt="Poster" class="img-fluid rounded" style="width: 60px; height: 90px; object-fit: cover;" onerror="this.style.display='none'">
                             </td>
                             <td>
-                                <h5 class="mb-1"><?= $title ?></h5>
+                                <h5 class="mb-1"><?= $title ?>
+                                    <?php if ((int)$s['is_ignored'] === 1): ?>
+                                        <span class="badge bg-secondary ms-2" title="No monitorizada"><i class="fa fa-pause me-1"></i>No monitorizada</span>
+                                    <?php endif; ?>
+                                </h5>
                                 <span class="text-muted"><i class="fa fa-calendar"></i> <?= $year ?></span>
                                 <?php if ($overview): ?>
                                     <div class="text-muted small mt-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"><?= $overview ?></div>
                                 <?php endif; ?>
                             </td>
                             <td class="text-end pe-4 text-muted" style="vertical-align:middle;">
+                                <?php if ((int)$s['is_ignored'] === 1): ?>
+                                    <button type="button" class="btn btn-sm btn-outline-success me-2" onclick="event.stopPropagation();toggleMonitorList('series', <?= $mediaId ?>, 'monitor')">
+                                        <i class="fa fa-play me-1"></i>Volver a monitorizar
+                                    </button>
+                                <?php else: ?>
+                                    <button type="button" class="btn btn-sm btn-outline-danger me-2" onclick="event.stopPropagation();toggleMonitorList('series', <?= $mediaId ?>, 'ignore')">
+                                        <i class="fa fa-ban me-1"></i>No monitorizar
+                                    </button>
+                                <?php endif; ?>
                                 <i class="fa fa-chevron-right"></i>
                             </td>
                         </tr>
@@ -101,6 +116,32 @@ $lastUpdate = $pdo->query("
 </div>
 
 <?php require_once 'includes/footer.php'; ?>
+
+<script>
+function toggleMonitorList(type, id, action) {
+    const csrf = document.getElementById('monitor-csrf')?.value || '';
+    const msgs = {
+        ignore: '¿Dejar de monitorizar este elemento?',
+        monitor: '¿Volver a monitorizar este elemento?'
+    };
+    if (!confirm(msgs[action] || '')) return;
+    fetch('ajax_monitor.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ action: action, type: type, id: id, _csrf_token: csrf })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'success') {
+            alert(data.message);
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.message || 'desconocido'));
+        }
+    })
+    .catch(() => alert('Error de conexión.'));
+}
+</script>
 
 <script>
 function filterSeries(query) {
