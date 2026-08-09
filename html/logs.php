@@ -1,145 +1,154 @@
 <?php
 // html/logs.php
+// Actividad del sistema: historial de traducciones, escaneos y errores de aplicación.
 require_once 'includes/header.php';
+require_once 'includes/security.php';
 
-// Manejar acción de vaciar logs
-if (isset($_POST['action']) && $_POST['action'] === 'clear_logs') {
-    $pdo->exec("DELETE FROM system_logs");
-    $message = "Los registros han sido vaciados correctamente.";
-    $status = "success";
+$message = '';
+$status = '';
+
+// Vaciar únicamente errores de aplicación (system_logs), con CSRF.
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action']) && $_POST['action'] === 'clear_logs') {
+        if (csrf_validate()) {
+            $pdo->exec("DELETE FROM system_logs");
+            $message = "Errores de aplicación vaciados correctamente.";
+            $status = "success";
+        } else {
+            $message = "Token de seguridad inválido o expirado. Recarga la página.";
+            $status = "danger";
+        }
+    }
 }
 
-// Obtener los logs de la base de datos (últimos 100)
-$stmt = $pdo->query("SELECT * FROM system_logs ORDER BY created_at DESC LIMIT 100");
-$logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// Errores de aplicación (system_logs) — solo se muestran si hay registros.
+$logs = [];
+$hasSystemLogs = false;
+try {
+    $stmt = $pdo->query("SELECT * FROM system_logs ORDER BY created_at DESC LIMIT 100");
+    $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $hasSystemLogs = count($logs) > 0;
+} catch (Exception $e) {
+    $logs = [];
+}
 
-// Leer archivo físico de logs del worker
-$workerLogPath = '/config/worker.log';
+// Historial de traducciones con resolución de título de serie en un solo LEFT JOIN.
+$translationLogs = [];
+try {
+    $stmt = $pdo->query("
+        SELECT tl.id, tl.media_id, tl.media_title, tl.media_type, tl.season, tl.episode,
+               tl.status, tl.result, tl.provider, tl.model, tl.created_at, tl.finished_at,
+               COALESCE(s.title, tl.media_title) AS display_title
+        FROM translation_log tl
+        LEFT JOIN episodes e ON tl.media_type IN ('episode', 'series') AND e.id = tl.media_id
+        LEFT JOIN series s ON s.id = e.series_id
+        ORDER BY tl.created_at DESC
+        LIMIT 50
+    ");
+    $translationLogs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $translationLogs = [];
+}
+
+// Historial de escaneos (background_tasks).
+$scanHistory = [];
+try {
+    $stmt = $pdo->query("
+        SELECT id, type, status, result, created_at, started_at, finished_at
+        FROM background_tasks
+        WHERE type = 'scan_media'
+        ORDER BY created_at DESC
+        LIMIT 20
+    ");
+    $scanHistory = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $scanHistory = [];
+}
+
+// Resumen de actividad.
+$summary = [
+    'pending'  => 0,
+    'running'  => 0,
+    'done'     => 0,
+    'error'    => 0,
+    'lastScan' => null,
+];
+try {
+    $summary['pending'] = (int)$pdo->query("SELECT COUNT(*) FROM background_tasks WHERE status='pending' AND type='translate'")->fetchColumn();
+    $summary['running'] = (int)$pdo->query("SELECT COUNT(*) FROM background_tasks WHERE status IN ('running','pending') AND type='translate'")->fetchColumn();
+    $summary['done']    = (int)$pdo->query("SELECT COUNT(*) FROM translation_log WHERE status='completed'")->fetchColumn();
+    $summary['error']   = (int)$pdo->query("SELECT COUNT(*) FROM translation_log WHERE status='error'")->fetchColumn();
+    $summary['lastScan']= $pdo->query("SELECT finished_at FROM background_tasks WHERE type='scan_media' AND status='done' ORDER BY finished_at DESC LIMIT 1")->fetchColumn();
+} catch (Exception $e) {
+}
+
+// Últimas 200 líneas del worker log para diagnóstico avanzado (plegado).
 $workerLogs = "";
+$workerLogPath = '/config/worker.log';
 if (file_exists($workerLogPath)) {
-    $size = filesize($workerLogPath);
-    $bytesToRead = min($size, 50 * 1024);
-    if ($bytesToRead > 0) {
-        $fp = fopen($workerLogPath, 'r');
-        fseek($fp, -$bytesToRead, SEEK_END);
-        $workerLogs = fread($fp, $bytesToRead);
-        fclose($fp);
+    $lines = @file($workerLogPath);
+    if ($lines) {
+        $workerLogs = implode('', array_slice($lines, -200));
     }
 } else {
     $workerLogs = "El archivo worker.log no existe aún.";
 }
-
-// Obtener historial de traducciones (translation_log)
-$translationLogs = [];
-try {
-    $stmt = $pdo->query("
-        SELECT id, media_id, media_title, media_type, season, episode, status, result, provider, model, created_at, finished_at 
-        FROM translation_log 
-        ORDER BY created_at DESC 
-        LIMIT 50
-    ");
-    $translationLogs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Corregir media_title para episodios: buscar título de la serie
-    foreach ($translationLogs as &$tl) {
-        if (($tl['media_type'] === 'episode' || $tl['media_type'] === 'series') && !empty($tl['media_id'])) {
-            $st = $pdo->prepare("SELECT s.title FROM episodes e JOIN series s ON s.id=e.series_id WHERE e.id = ?");
-            $st->execute([$tl['media_id']]);
-            $sr = $st->fetch(PDO::FETCH_ASSOC);
-            if ($sr && !empty($sr['title'])) {
-                $tl['media_title'] = $sr['title'];
-            }
-        }
-    }
-    unset($tl);
-} catch (Exception $e) {
-    $translationLogs = [];
-}
 ?>
-
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="mb-0"><i class="fa fa-terminal text-primary"></i> Logs del Sistema</h2>
-    
+    <h2 class="mb-0"><i class="fa fa-terminal text-primary"></i> Actividad del Sistema</h2>
     <div>
-        <form method="POST" style="display: inline-block;" onsubmit="return confirm('¿Estás seguro de que deseas eliminar todos los registros permanentemente?');">
-            <input type="hidden" name="action" value="clear_logs">
-            <button type="submit" class="btn btn-outline-danger btn-sm">
-                <i class="fa fa-trash"></i> Vaciar Logs
-            </button>
-        </form>
-        <a href="settings.php" class="btn btn-outline-light btn-sm ms-2"><i class="fa fa-arrow-left"></i> Volver a Ajustes</a>
+        <a href="settings.php" class="btn btn-outline-light btn-sm"><i class="fa fa-arrow-left"></i> Volver a Ajustes</a>
     </div>
 </div>
 
-<?php if (isset($message)): ?>
+<?php if ($message): ?>
     <div class="alert alert-<?= $status ?> alert-dismissible fade show">
-        <i class="fa fa-check-circle"></i> <?= htmlspecialchars($message) ?>
+        <i class="fa <?= $status === 'success' ? 'fa-check-circle' : 'fa-exclamation-triangle' ?>"></i> <?= htmlspecialchars($message) ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 <?php endif; ?>
 
-<div class="row">
-    <!-- LOGS DE ERRORES (Base de Datos) -->
-    <div class="col-md-6 mb-4">
+<!-- RESUMEN -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
         <div class="card glass-card h-100">
-            <div class="card-header bg-dark border-secondary text-danger fw-bold">
-                <i class="fa fa-database"></i> Errores de Aplicación (Traducción, N8N, BD)
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
-                    <table class="table table-dark table-hover mb-0" style="font-size: 0.85rem;">
-                        <thead style="position: sticky; top: 0; background: var(--card-bg); z-index: 1;">
-                            <tr>
-                                <th style="width: 140px;">Fecha y Hora</th>
-                                <th style="width: 110px;">Acción</th>
-                                <th>Detalle del Error</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (empty($logs)): ?>
-                                <tr>
-                                    <td colspan="3" class="text-center py-4 text-muted">
-                                        <i class="fa fa-check-circle fa-2x mb-2 text-success" style="opacity: 0.5;"></i><br>
-                                        No hay errores registrados.
-                                    </td>
-                                </tr>
-                            <?php else: ?>
-                                <?php foreach ($logs as $log): ?>
-                                    <tr>
-                                        <td class="text-muted"><small class="utc-date"><?= htmlspecialchars($log['created_at']) ?></small></td>
-                                        <td><span class="badge bg-secondary"><?= htmlspecialchars($log['action']) ?></span></td>
-                                        <td><code class="text-danger bg-dark p-1 rounded" style="word-break: break-all; white-space: pre-wrap;"><?= htmlspecialchars($log['message']) ?></code></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
+            <div class="card-body text-center">
+                <div class="fs-3 fw-bold text-info"><?= (int)$summary['running'] ?></div>
+                <div class="text-muted small">Traducciones en curso / pendientes</div>
             </div>
         </div>
     </div>
-
-    <!-- LOGS DEL WORKER (Archivo) -->
-    <div class="col-md-6 mb-4">
+    <div class="col-6 col-md-3">
         <div class="card glass-card h-100">
-            <div class="card-header bg-dark border-secondary text-warning fw-bold">
-                <i class="fa fa-file-text-o"></i> Consola Worker (Últimas líneas)
+            <div class="card-body text-center">
+                <div class="fs-3 fw-bold text-success"><?= (int)$summary['done'] ?></div>
+                <div class="text-muted small">Traducciones completadas</div>
             </div>
-            <div class="card-body p-0">
-                <textarea id="workerLogText" class="form-control bg-dark text-light font-monospace border-0 rounded-0" 
-                          style="height: 500px; resize: none; font-size: 0.75rem; padding: 1rem;" 
-                          readonly><?= htmlspecialchars($workerLogs) ?></textarea>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card glass-card h-100">
+            <div class="card-body text-center">
+                <div class="fs-3 fw-bold <?= $summary['error'] > 0 ? 'text-danger' : 'text-muted' ?>"><?= (int)$summary['error'] ?></div>
+                <div class="text-muted small">Traducciones con error</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card glass-card h-100">
+            <div class="card-body text-center">
+                <div class="fs-6 fw-bold text-warning"><?= $summary['lastScan'] ? '<small class="utc-date">' . htmlspecialchars($summary['lastScan']) . '</small>' : 'Sin escaneo' ?></div>
+                <div class="text-muted small">Último escaneo</div>
             </div>
         </div>
     </div>
 </div>
-
-<!-- TERCERA FILA: Historial de traducciones -->
+<!-- HISTORIAL DE TRADUCCIONES -->
 <div class="row">
     <div class="col-12 mb-4">
         <div class="card glass-card">
             <div class="card-header bg-dark border-secondary text-success fw-bold">
-                <i class="fa fa-language"></i> Historial de Traducciones Realizadas
+                <i class="fa fa-language"></i> Historial de Traducciones
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
@@ -173,21 +182,20 @@ try {
                                                 : ($tl['status'] === 'running'
                                                     ? '<span class="badge bg-info badge-running"><i class="fa fa-refresh fa-spin"></i> Ejecutando</span>'
                                                     : '<span class="badge bg-warning text-dark"><i class="fa fa-clock-o"></i> Pendiente</span>'));
-                                        $typeIcon = ($tl['media_type'] === 'movies' || $tl['media_type'] === 'movie')
-                                            ? '<i class="fa fa-film"></i> Película'
-                                            : '<i class="fa fa-tv"></i> Serie';
+                                        $isMovie = ($tl['media_type'] === 'movies' || $tl['media_type'] === 'movie');
+                                        $typeIcon = $isMovie ? '<i class="fa fa-film"></i> Película' : '<i class="fa fa-tv"></i> Serie';
                                         $epInfo = ($tl['media_type'] === 'series' || $tl['media_type'] === 'episode')
                                             ? 'T' . ($tl['season'] ?: '?') . ' E' . ($tl['episode'] ?: '?')
                                             : '-';
                                     ?>
                                     <tr>
-                                        <td><strong><?= htmlspecialchars($tl['media_title'] ?: 'Sin título') ?></strong></td>
+                                        <td><strong><?= htmlspecialchars($tl['display_title'] ?: $tl['media_title'] ?: 'Sin título') ?></strong></td>
                                         <td><?= $typeIcon ?></td>
                                         <td><small class="text-muted"><?= $epInfo ?></small></td>
                                         <td><?= !empty($tl['provider']) ? '<span class="badge bg-info text-dark">' . htmlspecialchars(ucfirst($tl['provider'])) . ($tl['model'] ? ' · ' . htmlspecialchars($tl['model']) : '') . '</span>' : '<span class="text-muted">-</span>' ?></td>
                                         <td><?= $statusBadge ?></td>
                                         <td class="text-muted"><small class="utc-date"><?= htmlspecialchars($tl['created_at']) ?></small></td>
-                                        <td><code class="text-muted bg-dark p-1 rounded" style="word-break: break-all; font-size:0.75rem;"><?= htmlspecialchars(substr($tl['result'] ?: ($tl['status'] === 'completed' ? 'Completado' : 'En espera...'), 0, 100)) ?></code></td>
+                                        <td><code class="text-muted bg-dark p-1 rounded" style="word-break: break-all; font-size:0.75rem;"><?= htmlspecialchars(substr($tl['result'] ?: ($tl['status'] === 'completed' ? 'Completado' : 'En espera...'), 0, 120)) ?></code></td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
@@ -198,23 +206,119 @@ try {
         </div>
     </div>
 </div>
+<!-- HISTORIAL DE ESCANEOS -->
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card glass-card">
+            <div class="card-header bg-dark border-secondary text-info fw-bold">
+                <i class="fa fa-refresh"></i> Historial de Escaneos
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                    <table class="table table-dark table-hover mb-0" style="font-size: 0.85rem;">
+                        <thead style="position: sticky; top: 0; background: var(--card-bg); z-index: 1;">
+                            <tr>
+                                <th style="width:160px;">Finalizado</th>
+                                <th style="width:100px;">Estado</th>
+                                <th>Resultado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($scanHistory)): ?>
+                                <tr>
+                                    <td colspan="3" class="text-center py-4 text-muted">No hay escaneos registrados.</td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($scanHistory as $sc): ?>
+                                    <tr>
+                                        <td class="text-muted"><small class="utc-date"><?= htmlspecialchars($sc['finished_at'] ?: $sc['created_at']) ?></small></td>
+                                        <td><span class="badge bg-success">OK</span></td>
+                                        <td><code class="text-muted bg-dark p-1 rounded" style="word-break: break-all; font-size:0.75rem;"><?= htmlspecialchars($sc['result'] ?: '-') ?></code></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- ERRORES DE APLICACIÓN (SOLO SI HAY) -->
+<?php if ($hasSystemLogs): ?>
+    <div class="row">
+        <div class="col-12 mb-4">
+            <div class="card glass-card">
+                <div class="card-header bg-dark border-secondary text-danger fw-bold d-flex justify-content-between align-items-center">
+                    <span><i class="fa fa-exclamation-triangle"></i> Errores de Aplicación</span>
+                    <form method="POST" class="m-0" onsubmit="return confirm('¿Vaciar los errores de aplicación?');">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="clear_logs">
+                        <button type="submit" class="btn btn-outline-danger btn-sm"><i class="fa fa-trash"></i> Vaciar errores</button>
+                    </form>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                        <table class="table table-dark table-hover mb-0" style="font-size: 0.85rem;">
+                            <thead style="position: sticky; top: 0; background: var(--card-bg); z-index: 1;">
+                                <tr>
+                                    <th style="width: 150px;">Fecha y Hora</th>
+                                    <th style="width: 120px;">Acción</th>
+                                    <th>Detalle</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($logs as $log): ?>
+                                    <tr>
+                                        <td class="text-muted"><small class="utc-date"><?= htmlspecialchars($log['created_at']) ?></small></td>
+                                        <td><span class="badge bg-secondary"><?= htmlspecialchars($log['action']) ?></span></td>
+                                        <td><code class="text-danger bg-dark p-1 rounded" style="word-break: break-all; white-space: pre-wrap;"><?= htmlspecialchars($log['message']) ?></code></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
+<!-- DIAGNÓSTICO AVANZADO: WORKER LOG PLEGADO -->
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card glass-card">
+            <div class="card-header bg-dark border-secondary text-warning fw-bold">
+                <i class="fa fa-file-text-o"></i>
+                <a class="text-warning text-decoration-none" data-bs-toggle="collapse" href="#workerLogCollapse" role="button" aria-expanded="false" aria-controls="workerLogCollapse">
+                    Diagnóstico avanzado — Consola del worker (últimas 200 líneas)
+                </a>
+            </div>
+            <div class="collapse" id="workerLogCollapse">
+                <div class="card-body p-0">
+                    <textarea id="workerLogText" class="form-control bg-dark text-light font-monospace border-0 rounded-0"
+                              style="height: 400px; resize: none; font-size: 0.75rem; padding: 1rem;" readonly><?= htmlspecialchars($workerLogs) ?></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Convertir fechas de la tabla de UTC a hora local
+    // Convertir fechas de las tablas de UTC a hora local
     document.querySelectorAll('.utc-date').forEach(el => {
         if (!el.textContent.trim()) return;
         const dateStr = el.textContent.trim().replace(' ', 'T') + 'Z';
         const date = new Date(dateStr);
         if (!isNaN(date)) {
-            el.textContent = date.toLocaleString('es-ES', { 
-                year: 'numeric', month: '2-digit', day: '2-digit', 
-                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
+            el.textContent = date.toLocaleString('es-ES', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
             }).replace(',', '');
         }
     });
 
-    // Convertir fechas en el textarea del worker
+    // Convertir fechas en el textarea del worker (si está visible)
     const textarea = document.getElementById('workerLogText');
     if (textarea) {
         let text = textarea.value;
@@ -228,7 +332,6 @@ document.addEventListener('DOMContentLoaded', function() {
             return match;
         });
         textarea.value = text;
-        // Auto scroll al final
         textarea.scrollTop = textarea.scrollHeight;
     }
 });
