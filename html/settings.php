@@ -31,59 +31,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $status = "danger";
             }
         }
-    } elseif (isset($_POST['form']) && $_POST['form'] === 'server') {
-        // === FORMULARIO 1: Servidor de Medios + Path Mapping ===
+    } elseif (isset($_POST['form']) && in_array($_POST['form'], ['sonarr', 'radarr'], true)) {
+        // === FORMULARIO 1: Configuración de Sonarr / Radarr ===
         rateLimitRequire('settings_save', 10, 60);
-        
-        $mediaServerType = trim($_POST['media_server_type'] ?? 'bazarr');
-        $mediaServerUrl = trim($_POST['media_server_url'] ?? '');
-        $rawMediaServerApiKey = trim($_POST['media_server_api_key'] ?? '');
-        
-        $storedMediaServerApiKey = $currentSettings['media_server_api_key'] ?? '';
-        if (isEncrypted($storedMediaServerApiKey)) {
-            $decryptedStored = decryptValue($storedMediaServerApiKey);
-            $mediaServerApiKeyChanged = ($rawMediaServerApiKey !== $decryptedStored);
+        $svc = $_POST['form']; // 'sonarr' | 'radarr'
+
+        $url = trim($_POST[$svc . '_url'] ?? '');
+        $enabled = (($_POST[$svc . '_enabled'] ?? '0') === '1') ? '1' : '0';
+        $rawApiKey = trim($_POST[$svc . '_api_key'] ?? '');
+
+        $storedApiKey = $currentSettings[$svc . '_api_key'] ?? '';
+        if (isEncrypted($storedApiKey)) {
+            $decryptedStored = decryptValue($storedApiKey);
+            $apiKeyChanged = ($rawApiKey !== $decryptedStored);
         } else {
-            $mediaServerApiKeyChanged = ($rawMediaServerApiKey !== $storedMediaServerApiKey);
+            $apiKeyChanged = ($rawApiKey !== $storedApiKey);
         }
-        $mediaServerApiKey = ($mediaServerApiKeyChanged && !empty($rawMediaServerApiKey))
-            ? encryptValue($rawMediaServerApiKey)
-            : $storedMediaServerApiKey;
-        
-        $pathMappingMoviesFrom = trim($_POST['path_mapping_movies_from'] ?? $_POST['path_mapping_movies_from_custom'] ?? '');
-        $pathMappingMoviesTo = trim($_POST['path_mapping_movies_to'] ?? '');
-        $pathMappingSeriesFrom = trim($_POST['path_mapping_series_from'] ?? $_POST['path_mapping_series_from_custom'] ?? '');
-        $pathMappingSeriesTo = trim($_POST['path_mapping_series_to'] ?? '');
+        $apiKey = ($apiKeyChanged && $rawApiKey !== '')
+            ? encryptValue($rawApiKey)
+            : $storedApiKey;
 
         try {
             $stmt = $pdo->prepare("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)");
             $pdo->beginTransaction();
-            $stmt->execute(['media_server_type', $mediaServerType]);
-            $stmt->execute(['media_server_url', $mediaServerUrl]);
-            $stmt->execute(['media_server_api_key', $mediaServerApiKey]);
-            $stmt->execute(['path_mapping_movies_from', $pathMappingMoviesFrom]);
-            $stmt->execute(['path_mapping_movies_to', $pathMappingMoviesTo]);
-            $stmt->execute(['path_mapping_series_from', $pathMappingSeriesFrom]);
-            $stmt->execute(['path_mapping_series_to', $pathMappingSeriesTo]);
+            $stmt->execute([$svc . '_url', $url]);
+            $stmt->execute([$svc . '_api_key', $apiKey]);
+            $stmt->execute([$svc . '_enabled', $enabled]);
             $pdo->commit();
-            $message = "Servidor de medios configurado correctamente.";
+            $message = ucfirst($svc) . " configurado correctamente.";
             $status = "success";
-            
-            // Auto-lanzar escaneo
-            if ($mediaServerUrl && $mediaServerApiKey) {
-                $cacheCount = $pdo->query("SELECT COUNT(*) FROM media_cache")->fetchColumn();
-                
-                $serverChanged = $mediaServerApiKeyChanged || $mediaServerUrl !== $currentSettings['media_server_url'] || $mediaServerType !== $currentSettings['media_server_type'];
 
-                if ($cacheCount == 0 || $serverChanged) {
-                    if ($serverChanged) {
-                        $pdo->exec("DELETE FROM media_cache");
-                        $pdo->exec("DELETE FROM background_tasks WHERE type='scan_media'");
-                        $message .= " Caché anterior eliminada.";
-                    }
-                    @touch('/config/scan_trigger.now');
-                    $message .= " Escaneo encolado en background.";
-                }
+            // Auto-lanzar escaneo si el servicio quedó configurado
+            if ($url !== '' && $apiKey !== '') {
+                @touch('/config/scan_trigger.now');
+                $message .= " Escaneo encolado en background.";
             }
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -130,14 +111,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $stmt = $pdo->query("SELECT setting_key, setting_value FROM settings");
 $currentSettings = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-// Fallback a bazarr_url si media_server_url no existe (para instalaciones previas)
-$currentMediaServerType = $currentSettings['media_server_type'] ?? 'bazarr';
-$currentMediaServerUrl = $currentSettings['media_server_url'] ?? $currentSettings['bazarr_url'] ?? '';
-$currentMediaServerApiKeyRaw = $currentSettings['media_server_api_key'] ?? $currentSettings['bazarr_api_key'] ?? '';
-// Desencriptar para mostrar en el formulario
-$currentMediaServerApiKey = (!empty($currentMediaServerApiKeyRaw) && isEncrypted($currentMediaServerApiKeyRaw))
-    ? decryptValue($currentMediaServerApiKeyRaw)
-    : $currentMediaServerApiKeyRaw;
+// Sonarr
+$currentSonarrUrl = $currentSettings['sonarr_url'] ?? '';
+$currentSonarrApiKeyRaw = $currentSettings['sonarr_api_key'] ?? '';
+$currentSonarrApiKey = (!empty($currentSonarrApiKeyRaw) && isEncrypted($currentSonarrApiKeyRaw))
+    ? decryptValue($currentSonarrApiKeyRaw)
+    : $currentSonarrApiKeyRaw;
+$currentSonarrEnabled = $currentSettings['sonarr_enabled'] ?? '0';
+
+// Radarr
+$currentRadarrUrl = $currentSettings['radarr_url'] ?? '';
+$currentRadarrApiKeyRaw = $currentSettings['radarr_api_key'] ?? '';
+$currentRadarrApiKey = (!empty($currentRadarrApiKeyRaw) && isEncrypted($currentRadarrApiKeyRaw))
+    ? decryptValue($currentRadarrApiKeyRaw)
+    : $currentRadarrApiKeyRaw;
+$currentRadarrEnabled = $currentSettings['radarr_enabled'] ?? '0';
 
 $currentDeepseekApiKeyRaw = $currentSettings['deepseek_api_key'] ?? '';
 $currentDeepseekApiKey = (!empty($currentDeepseekApiKeyRaw) && isEncrypted($currentDeepseekApiKeyRaw))
@@ -169,7 +157,7 @@ $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
     <!-- Menú Lateral -->
     <div class="col-md-3 mb-4">
         <div class="nav flex-column nav-pills glass-card p-3" id="settings-tabs" role="tablist" aria-orientation="vertical">
-            <button class="nav-link active text-start mb-2" id="tab-server" data-bs-toggle="pill" data-bs-target="#pane-server" type="button" role="tab" style="color: #fff;"><i class="fa fa-server me-2 text-info"></i> Servidor de Medios</button>
+            <button class="nav-link active text-start mb-2" id="tab-server" data-bs-toggle="pill" data-bs-target="#pane-server" type="button" role="tab" style="color: #fff;"><i class="fa fa-server me-2 text-info"></i> Sonarr / Radarr</button>
             <button class="nav-link text-start mb-2" id="tab-ai" data-bs-toggle="pill" data-bs-target="#pane-ai" type="button" role="tab" style="color: #fff;"><i class="fa fa-bolt me-2 text-warning"></i> DeepSeek AI</button>
             <button class="nav-link text-start mb-2" id="tab-tasks" data-bs-toggle="pill" data-bs-target="#pane-tasks" type="button" role="tab" style="color: #fff;"><i class="fa fa-clock-o me-2 text-success"></i> Tareas Programadas</button>
             <button class="nav-link text-start mb-4" id="tab-security" data-bs-toggle="pill" data-bs-target="#pane-security" type="button" role="tab" style="color: #fff;"><i class="fa fa-lock me-2 text-danger"></i> Seguridad</button>
@@ -182,101 +170,97 @@ $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
         
         <div class="tab-content" id="settings-tabContent">
                 
-                <!-- PANE 1: SERVIDOR DE MEDIOS -->
+                <!-- PANE 1: SONARR / RADARR -->
                 <div class="tab-pane fade show active" id="pane-server" role="tabpanel">
+
+                    <!-- ===== SONARR ===== -->
                     <form method="POST" action="settings.php">
-                        <input type="hidden" name="form" value="server">
+                        <input type="hidden" name="form" value="sonarr">
                         <?= csrf_field() ?>
-                    <div class="card glass-card mb-4">
-                        <div class="card-body p-4">
-                            <h4 class="mb-4 text-info"><i class="fa fa-server"></i> Conexión con Servidor de Medios</h4>
-                            
-                            <div class="mb-3">
-                                <label for="media_server_type" class="form-label">Motor de Medios</label>
-                                <select class="form-select" id="media_server_type" name="media_server_type" onchange="updateServerLabels()">
-                                    <option value="bazarr" <?= $currentMediaServerType === 'bazarr' ? 'selected' : '' ?>>Bazarr (Recomendado)</option>
-                                    <option value="emby" <?= $currentMediaServerType === 'emby' ? 'selected' : '' ?>>Emby</option>
-                                    <option value="jellyfin" <?= $currentMediaServerType === 'jellyfin' ? 'selected' : '' ?>>Jellyfin</option>
-                                </select>
-                                <div class="form-text text-muted">Selecciona la aplicación de la cual leeremos el catálogo de películas y series.</div>
-                            </div>
+                        <div class="card glass-card mb-4">
+                            <div class="card-body p-4">
+                                <h4 class="mb-2 text-info"><i class="fa fa-tv"></i> Sonarr — Series</h4>
+                                <p class="text-muted small mb-4">Fuente de series, episodios, IDs TVDB y rutas locales. La metadata se enriquecerá desde TheTVDB.</p>
 
-                            <div class="mb-3">
-                                <label id="lbl_media_server_url" for="media_server_url" class="form-label">URL del Servidor</label>
-                                <input type="url" class="form-control" id="media_server_url" name="media_server_url"
-                                       value="<?= htmlspecialchars($currentMediaServerUrl) ?>" 
-                                       placeholder="Ej: http://192.168.1.100:6767" required>
-                                <div class="form-text text-muted">Asegúrate de incluir http:// o https:// y el puerto.</div>
-                            </div>
-
-                            <div class="mb-4">
-                                <label id="lbl_media_server_api_key" for="media_server_api_key" class="form-label">API Key / Token</label>
-                                <div class="input-group">
-                                    <input type="password" class="form-control" id="media_server_api_key" name="media_server_api_key"
-                                           value="<?= htmlspecialchars($currentMediaServerApiKey) ?>" 
-                                           placeholder="Pega aquí la API Key o Token" required>
-                                    <button class="btn btn-outline-secondary toggle-password" type="button" data-target="media_server_api_key">
-                                        <i class="fa fa-eye"></i>
-                                    </button>
+                                <div class="form-check form-switch mb-4">
+                                    <input class="form-check-input" type="checkbox" id="sonarr_enabled" name="sonarr_enabled" value="1" <?= $currentSonarrEnabled === '1' ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="sonarr_enabled">Activar conexión con Sonarr</label>
                                 </div>
-                            </div>
 
-                            <div id="path_mapping_section">
-                                <hr style="border-color: rgba(255,255,255,0.1);" class="my-4">
-                                <h4 class="mb-4 text-info"><i class="fa fa-folder-open"></i> Mapeo de Rutas (Path Mapping)</h4>
-                                <p class="text-muted small mb-4">Si tu servidor de medios (Emby/Jellyfin) reporta las rutas de manera diferente a como están montadas en Translarr, configúralo aquí.</p>
-                                
-                                <h5 class="text-secondary"><i class="fa fa-film"></i> Películas</h5>
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label for="path_mapping_movies_from" class="form-label">Ruta Remota (En Emby/Jellyfin)</label>
-                                        <select class="form-select remote-path-select" id="path_mapping_movies_from" name="path_mapping_movies_from" data-current="<?= htmlspecialchars($currentPathMappingMoviesFrom) ?>">
-                                            <option value="">Selecciona o escribe una ruta...</option>
-                                            <?php if ($currentPathMappingMoviesFrom): ?>
-                                                <option value="<?= htmlspecialchars($currentPathMappingMoviesFrom) ?>" selected><?= htmlspecialchars($currentPathMappingMoviesFrom) ?></option>
-                                            <?php endif; ?>
-                                        </select>
-                                        <input type="text" class="form-control mt-2 remote-path-custom d-none" name="path_mapping_movies_from_custom" placeholder="O escribe la ruta manualmente">
-                                    </div>
-                                    <div class="col-md-6 mb-4">
-                                        <label for="path_mapping_movies_to" class="form-label">Ruta Local (En Translarr)</label>
-                                        <div class="input-group">
-                                            <input type="text" class="form-control" id="path_mapping_movies_to" name="path_mapping_movies_to"
-                                                   value="<?= htmlspecialchars($currentPathMappingMoviesTo) ?>" 
-                                                   placeholder="Ej: /home/media/movies">
-                                            <button class="btn btn-outline-info btn-browse" type="button" data-target="path_mapping_movies_to"><i class="fa fa-folder-open"></i> Explorar...</button>
-                                        </div>
+                                <div class="mb-3">
+                                    <label for="sonarr_url" class="form-label">URL de Sonarr</label>
+                                    <input type="url" class="form-control" id="sonarr_url" name="sonarr_url"
+                                           value="<?= htmlspecialchars($currentSonarrUrl) ?>"
+                                           placeholder="Ej: http://192.168.1.100:8989">
+                                    <div class="form-text text-muted">Incluye http:// o https:// y el puerto.</div>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label for="sonarr_api_key" class="form-label">API Key de Sonarr</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="sonarr_api_key" name="sonarr_api_key"
+                                               value="<?= htmlspecialchars($currentSonarrApiKey) ?>"
+                                               placeholder="Pega aquí la API Key">
+                                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="sonarr_api_key">
+                                            <i class="fa fa-eye"></i>
+                                        </button>
                                     </div>
                                 </div>
 
-                                <h5 class="text-secondary"><i class="fa fa-tv"></i> Series</h5>
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label for="path_mapping_series_from" class="form-label">Ruta Remota (En Emby/Jellyfin)</label>
-                                        <select class="form-select remote-path-select" id="path_mapping_series_from" name="path_mapping_series_from" data-current="<?= htmlspecialchars($currentPathMappingSeriesFrom) ?>">
-                                            <option value="">Selecciona o escribe una ruta...</option>
-                                            <?php if ($currentPathMappingSeriesFrom): ?>
-                                                <option value="<?= htmlspecialchars($currentPathMappingSeriesFrom) ?>" selected><?= htmlspecialchars($currentPathMappingSeriesFrom) ?></option>
-                                            <?php endif; ?>
-                                        </select>
-                                        <input type="text" class="form-control mt-2 remote-path-custom d-none" name="path_mapping_series_from_custom" placeholder="O escribe la ruta manualmente">
-                                    </div>
-                                    <div class="col-md-6 mb-4">
-                                        <label for="path_mapping_series_to" class="form-label">Ruta Local (En Translarr)</label>
-                                        <div class="input-group">
-                                            <input type="text" class="form-control" id="path_mapping_series_to" name="path_mapping_series_to"
-                                                   value="<?= htmlspecialchars($currentPathMappingSeriesTo) ?>" 
-                                                   placeholder="Ej: /home/media/tvshows">
-                                            <button class="btn btn-outline-info btn-browse" type="button" data-target="path_mapping_series_to"><i class="fa fa-folder-open"></i> Explorar...</button>
-                                        </div>
-                                    </div>
-                                </div>
+                                <button type="button" class="btn btn-outline-info btn-test-conn" data-service="sonarr">
+                                    <i class="fa fa-plug me-1"></i> Probar conexión
+                                </button>
+                                <div id="test-result-sonarr" class="mt-2 small"></div>
                             </div>
                         </div>
-                    </div>
-                    <div class="text-end mb-4">
-                        <button type="submit" class="btn btn-gradient btn-lg w-100 shadow"><i class="fa fa-save me-2"></i> Guardar Servidor de Medios</button>
-                    </div>
+                        <div class="text-end mb-4">
+                            <button type="submit" class="btn btn-gradient btn-lg w-100 shadow"><i class="fa fa-save me-2"></i> Guardar Sonarr</button>
+                        </div>
+                    </form>
+
+                    <!-- ===== RADARR ===== -->
+                    <form method="POST" action="settings.php">
+                        <input type="hidden" name="form" value="radarr">
+                        <?= csrf_field() ?>
+                        <div class="card glass-card mb-4">
+                            <div class="card-body p-4">
+                                <h4 class="mb-2 text-primary"><i class="fa fa-film"></i> Radarr — Películas</h4>
+                                <p class="text-muted small mb-4">Fuente de películas, IDs TMDB y rutas locales. La metadata se enriquecerá desde TMDB.</p>
+
+                                <div class="form-check form-switch mb-4">
+                                    <input class="form-check-input" type="checkbox" id="radarr_enabled" name="radarr_enabled" value="1" <?= $currentRadarrEnabled === '1' ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="radarr_enabled">Activar conexión con Radarr</label>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="radarr_url" class="form-label">URL de Radarr</label>
+                                    <input type="url" class="form-control" id="radarr_url" name="radarr_url"
+                                           value="<?= htmlspecialchars($currentRadarrUrl) ?>"
+                                           placeholder="Ej: http://192.168.1.100:7878">
+                                    <div class="form-text text-muted">Incluye http:// o https:// y el puerto.</div>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label for="radarr_api_key" class="form-label">API Key de Radarr</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="radarr_api_key" name="radarr_api_key"
+                                               value="<?= htmlspecialchars($currentRadarrApiKey) ?>"
+                                               placeholder="Pega aquí la API Key">
+                                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="radarr_api_key">
+                                            <i class="fa fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <button type="button" class="btn btn-outline-primary btn-test-conn" data-service="radarr">
+                                    <i class="fa fa-plug me-1"></i> Probar conexión
+                                </button>
+                                <div id="test-result-radarr" class="mt-2 small"></div>
+                            </div>
+                        </div>
+                        <div class="text-end mb-4">
+                            <button type="submit" class="btn btn-gradient btn-lg w-100 shadow"><i class="fa fa-save me-2"></i> Guardar Radarr</button>
+                        </div>
                     </form>
                 </div>
 
@@ -446,180 +430,50 @@ document.querySelectorAll('.toggle-password').forEach(button => {
     });
 });
 
-function updateServerLabels() {
-    const type = document.getElementById('media_server_type').value;
-    const lblUrl = document.getElementById('lbl_media_server_url');
-    const lblApi = document.getElementById('lbl_media_server_api_key');
-    const pathSection = document.getElementById('path_mapping_section');
-    
-    if (type === 'bazarr') {
-        lblUrl.textContent = 'URL de Bazarr';
-        lblApi.textContent = 'API Key de Bazarr';
-        pathSection.style.display = 'none';
-    } else if (type === 'emby') {
-        lblUrl.textContent = 'URL de Emby';
-        lblApi.textContent = 'API Key (Token) de Emby';
-        pathSection.style.display = 'block';
-    } else if (type === 'jellyfin') {
-        lblUrl.textContent = 'URL de Jellyfin';
-        lblApi.textContent = 'API Key (Token) de Jellyfin';
-        pathSection.style.display = 'block';
-    }
-}
+// Prueba de conexión Sonarr/Radarr (POST con CSRF; la API key nunca viaja por URL)
+document.querySelectorAll('.btn-test-conn').forEach(btn => {
+    btn.addEventListener('click', function () {
+        const service = this.getAttribute('data-service');
+        const urlInput = document.getElementById(service + '_url');
+        const keyInput = document.getElementById(service + '_api_key');
+        const resultEl = document.getElementById('test-result-' + service);
+        const csrfInput = document.querySelector('input[name="_csrf_token"]');
 
-// Inicializar etiquetas
-updateServerLabels();
+        const url = (urlInput.value || '').trim();
+        const apiKey = (keyInput.value || '').trim();
 
-// Autodescubrimiento de Rutas Remotas
-function fetchRemotePaths() {
-    const selects = document.querySelectorAll('.remote-path-select');
-    const type = document.getElementById('media_server_type').value;
-    const url = document.getElementById('media_server_url').value;
-    const apiKey = document.getElementById('media_server_api_key').value;
-
-    // Si falta URL o API Key, mostrar mensaje y salir
-    if (!url || !apiKey) {
-        selects.forEach(select => {
-            select.innerHTML = '<option value="">Completa URL y API Key primero...</option>';
-            select.value = '';
-            select.removeAttribute('disabled');
-            const customInput = select.nextElementSibling;
-            if (customInput && customInput.classList) {
-                customInput.classList.add('d-none');
-                customInput.setAttribute('disabled', 'disabled');
-            }
-        });
-        return;
-    }
-
-    selects.forEach(select => {
-        select.innerHTML = '<option value="">Cargando rutas de Emby/Jellyfin...</option>';
-        const customInput = select.nextElementSibling;
-        if (customInput && customInput.classList) {
-            customInput.classList.add('d-none');
-            customInput.setAttribute('disabled', 'disabled');
+        if (!url) {
+            resultEl.innerHTML = '<span class="text-warning"><i class="fa fa-exclamation-triangle me-1"></i>Indica primero la URL.</span>';
+            return;
         }
-        select.removeAttribute('disabled');
-    });
 
-    const query = new URLSearchParams({ type, url, api_key: apiKey }).toString();
+        resultEl.innerHTML = '<span class="text-info"><i class="fa fa-spinner fa-spin me-1"></i>Probando conexión...</span>';
+        this.disabled = true;
 
-    fetch('ajax_remote_paths.php?' + query)
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success' && data.paths && data.paths.length > 0) {
-                selects.forEach(select => {
-                    const currentValue = select.getAttribute('data-current');
-                    let optionsHTML = '<option value="">Selecciona una ruta remota...</option>';
-                    let valueFound = false;
-                    
-                    data.paths.forEach(path => {
-                        const selected = (path === currentValue) ? 'selected' : '';
-                        if (path === currentValue) valueFound = true;
-                        optionsHTML += `<option value="${path}" ${selected}>${path}</option>`;
-                    });
-                    
-                    optionsHTML += '<option value="custom">-- Otra (Escribir manualmente) --</option>';
-                    select.innerHTML = optionsHTML;
-                    select.removeAttribute('disabled');
-                    
-                    const customInput = select.nextElementSibling;
-                    if (customInput && customInput.classList) {
-                        customInput.classList.add('d-none');
-                        customInput.setAttribute('disabled', 'disabled');
-                    }
-                    
-                    /*if (currentValue && !valueFound) {
-                        select.value = 'custom';
-                        if (customInput && customInput.classList) {
-                            customInput.classList.remove('d-none');
-                            customInput.removeAttribute('disabled');
-                            customInput.value = currentValue;
-                        }
-                        select.setAttribute('disabled', 'disabled');
-                    }*/
-                });
-            } else {
-                // Si no hay rutas, mostrar opción para escribir manualmente
-                selects.forEach(select => {
-                    select.innerHTML = '<option value="custom">-- Escribir manualmente --</option>';
-                    select.value = 'custom';
-                    const customInput = select.nextElementSibling;
-                    if (customInput && customInput.classList) {
-                        customInput.classList.remove('d-none');
-                        customInput.value = select.getAttribute('data-current') || '';
-                        customInput.removeAttribute('disabled');
-                        customInput.placeholder = 'Ej: /media/movies';
-                    }
-                    select.setAttribute('disabled', 'disabled');
-                });
-            }
+        const body = new URLSearchParams({ service: service, url: url, api_key: apiKey });
+        if (csrfInput) body.append('_csrf_token', csrfInput.value);
+
+        fetch('ajax_test_connection.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
         })
-        .catch(err => {
-            console.error('Error fetching remote paths', err);
-            selects.forEach(select => {
-                select.innerHTML = '<option value="custom">Error de conexión</option>';
-                select.value = 'custom';
-                const customInput = select.nextElementSibling;
-                if (customInput && customInput.classList) {
-                    customInput.classList.remove('d-none');
-                    customInput.value = select.getAttribute('data-current') || '';
-                    customInput.removeAttribute('disabled');
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    resultEl.innerHTML = '<span class="text-success"><i class="fa fa-check-circle me-1"></i>' + (data.message || 'Conexión exitosa.') + '</span>';
+                } else {
+                    resultEl.innerHTML = '<span class="text-danger"><i class="fa fa-exclamation-circle me-1"></i>' + (data.message || 'Error de conexión.') + '</span>';
                 }
-                select.setAttribute('disabled', 'disabled');
+            })
+            .catch(() => {
+                resultEl.innerHTML = '<span class="text-danger"><i class="fa fa-exclamation-circle me-1"></i>Error de red.</span>';
+            })
+            .finally(() => {
+                this.disabled = false;
             });
-        });
-}
-
-// Lógica de select vs custom input
-document.querySelectorAll('.remote-path-select').forEach(select => {
-    select.addEventListener('change', function() {
-        const customInput = this.nextElementSibling;
-
-        if (this.value === 'custom') {
-            // Mostrar input custom, deshabilitar el select para que no envíe su valor
-            customInput.classList.remove('d-none');
-            customInput.removeAttribute('disabled');
-            this.setAttribute('disabled', 'disabled');
-        } else {
-            // Ocultar input custom, habilitar el select
-            customInput.classList.add('d-none');
-            customInput.setAttribute('disabled', 'disabled');
-            this.removeAttribute('disabled');
-        }
     });
 });
-
-// Cargar rutas iniciales solo si hay URL y API Key
-if (document.getElementById('media_server_type').value !== 'bazarr') {
-    const initialUrl = document.getElementById('media_server_url').value;
-    const initialKey = document.getElementById('media_server_api_key').value;
-    if (initialUrl && initialKey) {
-        fetchRemotePaths();
-    } else {
-        // Mostrar mensaje en los selects
-        document.querySelectorAll('.remote-path-select').forEach(select => {
-            select.innerHTML = '<option value="">Completa URL y API Key para cargar rutas...</option>';
-        });
-    }
-}
-
-// Al cambiar el servidor, ocultar/mostrar y actualizar
-document.getElementById('media_server_type').addEventListener('change', function() {
-    updateServerLabels();
-    if (this.value !== 'bazarr') {
-        fetchRemotePaths();
-    }
-});
-
-// Al cambiar la URL o API Key, si no estamos en bazarr, volver a buscar rutas
-document.getElementById('media_server_url').addEventListener('blur', function() {
-    if (document.getElementById('media_server_type').value !== 'bazarr') fetchRemotePaths();
-});
-document.getElementById('media_server_api_key').addEventListener('blur', function() {
-    if (document.getElementById('media_server_type').value !== 'bazarr') fetchRemotePaths();
-});
-
 // Explorador Local
 const browserModal = new bootstrap.Modal(document.getElementById('browserModal'));
 

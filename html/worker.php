@@ -17,7 +17,8 @@ if (!flock($lockHandle, LOCK_EX | LOCK_NB)) { echo "Worker ya corre.\n"; exit(0)
 
 define('WORKER_RUNNING', true);
 require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/includes/MediaServerFactory.php';
+require_once __DIR__ . '/includes/ArrFactory.php';
+require_once __DIR__ . '/includes/SubtitleScanner.php';
 require_once __DIR__ . '/includes/security.php';
 
 $lastScanTime = 0;
@@ -46,6 +47,12 @@ $_migrations = [
     "ALTER TABLE translation_log ADD COLUMN started_at DATETIME",
     "ALTER TABLE media_cache ADD COLUMN overview TEXT",
     "ALTER TABLE media_cache ADD COLUMN folder_path TEXT",
+    "ALTER TABLE media_cache ADD COLUMN sonarr_series_id TEXT",
+    "ALTER TABLE media_cache ADD COLUMN sonarr_episode_id TEXT",
+    "ALTER TABLE media_cache ADD COLUMN tvdb_id TEXT",
+    "ALTER TABLE media_cache ADD COLUMN radarr_id TEXT",
+    "ALTER TABLE media_cache ADD COLUMN tmdb_id TEXT",
+    "ALTER TABLE media_cache ADD COLUMN video_path TEXT",
 ];
 foreach ($_migrations as $_sql) {
     try { $_migPdo->exec($_sql); } catch (Exception $_e) { /* columna ya existe, ignorar */ }
@@ -56,76 +63,139 @@ unset($_migrations, $_sql, $_e);
 
 
 function doScanMedia(): string {
-    workerLog("=== Escaneando ===");
+    workerLog("=== Escaneando (Sonarr/Radarr) ===");
     $pdo = freshPDO();
-    
+
     // Recargar config desde BD (por si cambió entre ciclos)
-    $stmt = $pdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('media_server_type','media_server_url','media_server_api_key')");
+    $stmt = $pdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('sonarr_url','sonarr_api_key','sonarr_enabled','radarr_url','radarr_api_key','radarr_enabled')");
     $cfg = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-    
-    $type = $cfg['media_server_type'] ?? MEDIA_SERVER_TYPE;
-    $url = $cfg['media_server_url'] ?? MEDIA_SERVER_URL;
-    $apiKey = $cfg['media_server_api_key'] ?? MEDIA_SERVER_API_KEY;
-    
-    // Desencriptar si está encriptado
-    if (isEncrypted($apiKey)) {
-        $apiKey = decryptValue($apiKey);
-    }
-    
-    $api = MediaServerFactory::getAPI($type, $url, $apiKey);
+
     $stats = ['movies' => 0, 'series' => 0, 'episodes' => 0];
-    try {
-        $scanTime = $pdo->query("SELECT datetime('now')")->fetchColumn();
-        
-        // Peliculas
+    $scanned = ['movies' => false, 'series' => false, 'episodes' => false];
+    $scanTime = $pdo->query("SELECT datetime('now')")->fetchColumn();
+
+    // ==================== SONARR (series y episodios) ====================
+    $sonarrEnabled = (($cfg['sonarr_enabled'] ?? '0') === '1')
+        || (($cfg['sonarr_url'] ?? '') !== '' && ($cfg['sonarr_api_key'] ?? '') !== '');
+    if (!$sonarrEnabled) {
+        workerLog("Sonarr no configurado. Omitido.");
+    } else {
         try {
-            $movies = $api->getMovies();
+            $sonarrKey = $cfg['sonarr_api_key'] ?? '';
+            if (isEncrypted($sonarrKey)) $sonarrKey = decryptValue($sonarrKey);
+            $sonarr = ArrFactory::sonarr($cfg['sonarr_url'] ?? '', $sonarrKey);
+
+            $seriesList = $sonarr->getSeries();
+
+            $upsertSeries = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,tvdb_id,sonarr_series_id,poster_url,overview,folder_path,updated_at) VALUES(?,'series',?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,tvdb_id=excluded.tvdb_id,sonarr_series_id=excluded.sonarr_series_id,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,updated_at=CURRENT_TIMESTAMP");
+
             $pdo->beginTransaction();
-            $s = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,poster_url,has_spanish,overview,folder_path,updated_at) VALUES(?,'movie',?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,poster_url=excluded.poster_url,has_spanish=excluded.has_spanish,overview=excluded.overview,folder_path=excluded.folder_path,updated_at=CURRENT_TIMESTAMP");
-            foreach ($movies as $m) {
-                $hs = isset($m['has_spanish']) ? (int)$m['has_spanish'] : 0;
-                $s->execute([$m['id'],$m['title']??'',$m['year']??'',$m['poster']??'',$hs,$m['overview']??'',$m['folder_path']??'']);
-                $stats['movies']++;
+            foreach ($seriesList as $s) {
+                $upsertSeries->execute([$s['id'], $s['title'], $s['year'], $s['tvdbId'], $s['id'], $s['poster'], $s['overview'], $s['path']]);
+                $stats['series']++;
             }
             $pdo->commit();
-            $pdo = null;
-            workerLog("Peliculas: {$stats['movies']}");
-        } catch (Exception $e) { if($pdo&&$pdo->inTransaction())$pdo->rollBack(); $pdo=null; workerLog("Error peliculas: ".$e->getMessage()); }
-        
-        // Series
-        $pdo = freshPDO();
-        try {
-            $series = $api->getSeries();
-            foreach ($series as $show) {
-                $pdo->beginTransaction();
-                $pdo->prepare("INSERT INTO media_cache(id,type,title,poster_url,overview,folder_path,updated_at) VALUES(?,'series',?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,updated_at=CURRENT_TIMESTAMP")->execute([$show['id'],$show['title']??'',$show['poster']??'',$show['overview']??'',$show['folder_path']??'']);
-                $pdo->commit();
-                $stats['series']++;
+            $scanned['series'] = true;
+
+            $upsertEp = $pdo->prepare("INSERT INTO media_cache(id,type,series_id,title,season,episode,tvdb_id,sonarr_series_id,sonarr_episode_id,video_path,folder_path,has_spanish,updated_at) VALUES(?,'episode',?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET series_id=excluded.series_id,title=excluded.title,season=excluded.season,episode=excluded.episode,tvdb_id=excluded.tvdb_id,sonarr_series_id=excluded.sonarr_series_id,sonarr_episode_id=excluded.sonarr_episode_id,video_path=excluded.video_path,folder_path=excluded.folder_path,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
+            foreach ($seriesList as $s) {
                 try {
-                    $eps = $api->getEpisodes($show['id']);
+                    $eps = $sonarr->getEpisodes($s['id']);
+                    $files = $sonarr->getEpisodeFiles($s['id']);
+                    $fileById = [];
+                    foreach ($files as $f) {
+                        $p = $f['path'];
+                        if ($p === '' && $f['relativePath'] !== '') {
+                            $p = rtrim($s['path'], '/') . '/' . ltrim($f['relativePath'], '/');
+                        }
+                        if ($p !== '') $fileById[$f['id']] = $p;
+                    }
                     $pdo->beginTransaction();
-                    $se = $pdo->prepare("INSERT INTO media_cache(id,type,series_id,title,season,episode,poster_url,has_spanish,folder_path,updated_at) VALUES(?,'episode',?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,season=excluded.season,episode=excluded.episode,poster_url=excluded.poster_url,has_spanish=excluded.has_spanish,folder_path=excluded.folder_path,updated_at=CURRENT_TIMESTAMP");
                     foreach ($eps as $ep) {
-                        $hs = isset($ep['has_spanish']) ? (int)$ep['has_spanish'] : 0;
-                        $se->execute([$ep['id'],$show['id'],$ep['title']??'',(int)($ep['season']??0),(int)($ep['episode']??0),$show['poster']??'',$hs,$ep['folder_path']??'']);
+                        $videoPath = isset($fileById[$ep['episodeFileId']]) ? $fileById[$ep['episodeFileId']] : '';
+                        $hasSpanish = 0;
+                        if ($videoPath && is_file($videoPath)) {
+                            $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
+                        }
+                        $upsertEp->execute([$ep['id'], $s['id'], $ep['title'], (int)$ep['season'], (int)$ep['episode'], $ep['tvdbEpisodeId'], $s['id'], $ep['id'], $videoPath, $s['path'], $hasSpanish]);
                         $stats['episodes']++;
                     }
                     $pdo->commit();
-                } catch (Exception $e) { if($pdo->inTransaction())$pdo->rollBack(); workerLog("Error eps {$show['title']}: ".$e->getMessage()); }
+                    $scanned['episodes'] = true;
+                } catch (Exception $e) {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    workerLog("  Error eps {$s['title']}: " . $e->getMessage());
+                }
             }
-            workerLog("Series: {$stats['series']}, Epis: {$stats['episodes']}");
-        } catch (Exception $e) { workerLog("Error series: ".$e->getMessage()); }
-        $pdo = null;
+            workerLog("Sonarr: {$stats['series']} series, {$stats['episodes']} episodios.");
+        } catch (Exception $e) {
+            workerLog("Error Sonarr: " . $e->getMessage());
+        }
+    }
+
+    // ==================== RADARR (películas) ====================
+    $radarrEnabled = (($cfg['radarr_enabled'] ?? '0') === '1')
+        || (($cfg['radarr_url'] ?? '') !== '' && ($cfg['radarr_api_key'] ?? '') !== '');
+    if (!$radarrEnabled) {
+        workerLog("Radarr no configurado. Omitido.");
+    } else {
+        try {
+            $radarrKey = $cfg['radarr_api_key'] ?? '';
+            if (isEncrypted($radarrKey)) $radarrKey = decryptValue($radarrKey);
+            $radarr = ArrFactory::radarr($cfg['radarr_url'] ?? '', $radarrKey);
+
+            $movies = $radarr->getMovies();
+            $files = $radarr->getMovieFiles();
+
+            $fileByMovie = [];
+            $moviePathById = [];
+            foreach ($movies as $m) $moviePathById[$m['id']] = $m['path'];
+            foreach ($files as $f) {
+                $p = $f['path'];
+                if ($p === '' && $f['relativePath'] !== '') {
+                    $p = rtrim($moviePathById[$f['movieId']] ?? '', '/') . '/' . ltrim($f['relativePath'], '/');
+                }
+                if ($p !== '') $fileByMovie[$f['movieId']] = $p;
+            }
+
+            $upsertMovie = $pdo->prepare("INSERT INTO media_cache(id,type,title,year,tmdb_id,radarr_id,poster_url,overview,folder_path,video_path,has_spanish,updated_at) VALUES(?,'movie',?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title=excluded.title,year=excluded.year,tmdb_id=excluded.tmdb_id,radarr_id=excluded.radarr_id,poster_url=excluded.poster_url,overview=excluded.overview,folder_path=excluded.folder_path,video_path=excluded.video_path,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
+
+            $pdo->beginTransaction();
+            foreach ($movies as $m) {
+                $videoPath = $fileByMovie[$m['id']] ?? '';
+                if ($videoPath === '') {
+                    $videoPath = SubtitleScanner::findVideoInFolder($m['path'] ?? '');
+                }
+                $hasSpanish = 0;
+                if ($videoPath && is_file($videoPath)) {
+                    $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
+                }
+                $upsertMovie->execute([$m['id'], $m['title'], $m['year'], $m['tmdbId'], $m['id'], $m['poster'], $m['overview'], $m['path'], $videoPath, $hasSpanish]);
+                $stats['movies']++;
+            }
+            $pdo->commit();
+            $scanned['movies'] = true;
+            workerLog("Radarr: {$stats['movies']} películas.");
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            workerLog("Error Radarr: " . $e->getMessage());
+        }
+    }
         
-        // Limpiar
-        $pdo = freshPDO();
-        $d = $pdo->exec("DELETE FROM media_cache WHERE updated_at<'$scanTime'");
-        $pdo = null;
-        workerLog("Limpieza: $d registros.");
-        $r = "{$stats['movies']} movies, {$stats['series']} series, {$stats['episodes']} eps.";
-        workerLog("OK. $r");
-        return $r;
-    } catch (Exception $e) { $pdo=null; return "Error: ".$e->getMessage(); }
+    // Limpiar solo los tipos que se escanearon correctamente
+    $pdo = freshPDO();
+    $d = 0;
+    if ($scanned['series'] || $scanned['episodes']) {
+        $d += $pdo->exec("DELETE FROM media_cache WHERE type IN ('series','episode') AND updated_at < '$scanTime'");
+    }
+    if ($scanned['movies']) {
+        $d += $pdo->exec("DELETE FROM media_cache WHERE type='movie' AND updated_at < '$scanTime'");
+    }
+    $pdo = null;
+    workerLog("Limpieza: $d registros.");
+    $r = "{$stats['movies']} movies, {$stats['series']} series, {$stats['episodes']} eps.";
+    workerLog("OK. $r");
+    return $r;
 }
 
 function doTrans(int $taskId, string $payloadJson): void {
@@ -228,47 +298,26 @@ function doTrans(int $taskId, string $payloadJson): void {
     // Guardar SRT final
     $finalSrt = trim(implode("\n\n",$results));
     
-    // Recargar config desde BD
-    $px = freshPDO();
-    $stmt = $px->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('media_server_type','media_server_url','media_server_api_key')");
-    $cfg = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-    $px = null;
-    $t = $cfg['media_server_type'] ?? MEDIA_SERVER_TYPE;
-    $u = $cfg['media_server_url'] ?? MEDIA_SERVER_URL;
-    $k = $cfg['media_server_api_key'] ?? MEDIA_SERVER_API_KEY;
-    if (isEncrypted($k)) $k = decryptValue($k);
-    $api = MediaServerFactory::getAPI($t, $u, $k);
+    // Guardar el SRT final en el filesystem, junto al subtítulo original
     $origPath = $job['path'];
     $stype = strtolower(trim($job['type']));
-    
+    $from = ($stype==='movies'||$stype==='movie') ? (defined('PATH_MAPPING_MOVIES_FROM')?PATH_MAPPING_MOVIES_FROM:'') : (defined('PATH_MAPPING_SERIES_FROM')?PATH_MAPPING_SERIES_FROM:'');
+    $to = ($stype==='movies'||$stype==='movie') ? (defined('PATH_MAPPING_MOVIES_TO')?PATH_MAPPING_MOVIES_TO:'') : (defined('PATH_MAPPING_SERIES_TO')?PATH_MAPPING_SERIES_TO:'');
+    $wp = $origPath;
+    if ($from !== '' && $to !== '' && strpos($origPath, $from) === 0) $wp = $to . substr($origPath, strlen($from));
+
     try {
-        if ($api->supportsDirectWrite()) {
-            $from = ($stype==='movies'||$stype==='movie') ? (defined('PATH_MAPPING_MOVIES_FROM')?PATH_MAPPING_MOVIES_FROM:'') : (defined('PATH_MAPPING_SERIES_FROM')?PATH_MAPPING_SERIES_FROM:'');
-            $to = ($stype==='movies'||$stype==='movie') ? (defined('PATH_MAPPING_MOVIES_TO')?PATH_MAPPING_MOVIES_TO:'') : (defined('PATH_MAPPING_SERIES_TO')?PATH_MAPPING_SERIES_TO:'');
-            $wp = $origPath;
-            if ($from!=='' && $to!=='' && strpos($origPath,$from)===0) $wp = $to.substr($origPath,strlen($from));
-            $dir = dirname($wp);
-            $fn = basename($wp);
-            $parts = explode('.',$fn);
-            $ext = array_pop($parts);
-            if (count($parts)>1 && strlen(end($parts))<=3) array_pop($parts);
-            $parts[]='es'; $parts[]=$ext;
-            $np = $dir.DIRECTORY_SEPARATOR.implode('.',$parts);
-            file_put_contents($np,$finalSrt);
-            $api->refreshItem($job['media_id']);
-            workerLog("  Guardado: $np");
-        } else {
-            $tmp = '/tmp/translarr_'.uniqid().'.es.srt';
-            file_put_contents($tmp,$finalSrt);
-            $url = ($stype==='series'||$stype==='episode') ? MEDIA_SERVER_URL."/api/episodes/subtitles?episodeid={$job['media_id']}&seriesid={$job['series_id']}&language=es" : MEDIA_SERVER_URL."/api/movies/subtitles?radarrid={$job['media_id']}&language=es";
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [CURLOPT_HTTPHEADER=>['X-API-KEY: '.MEDIA_SERVER_API_KEY],CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>['file'=>new CURLFile($tmp,'text/plain',basename($job['path']))],CURLOPT_RETURNTRANSFER=>true]);
-            $resp = curl_exec($ch);
-            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            @unlink($tmp);
-            if ($code>=400 && $code!==204) throw new Exception("Bazarr HTTP $code");
-        }
+        $dir = dirname($wp);
+        $fn = basename($wp);
+        $parts = explode('.', $fn);
+        $ext = array_pop($parts);
+        if (count($parts) > 1 && strlen(end($parts)) <= 3) array_pop($parts);
+        $parts[] = 'es';
+        $parts[] = $ext;
+        $np = $dir . DIRECTORY_SEPARATOR . implode('.', $parts);
+
+        file_put_contents($np, $finalSrt);
+        workerLog("  Guardado: $np");
     } catch (Exception $e) {
         workerLog("  Error guardando: ".$e->getMessage());
         markError($logId, "Guardado: ".$e->getMessage());

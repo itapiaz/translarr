@@ -5,7 +5,7 @@ ini_set('display_errors', 0);
 require_once 'includes/auth.php';
 requireLogin();
 require_once 'config.php';
-require_once 'includes/MediaServerFactory.php';
+require_once 'includes/SubtitleScanner.php';
 require_once 'includes/security.php';
 
 header('Content-Type: application/json');
@@ -23,10 +23,21 @@ if (!$epId) {
 }
 
 try {
-    $api = MediaServerFactory::getAPI();
+    // Obtener el medio desde la caché para conocer sus rutas
+    $row = $pdo->prepare("SELECT * FROM media_cache WHERE id = ?");
+    $row->execute([$epId]);
+    $media = $row->fetch(PDO::FETCH_ASSOC);
 
-    // Obtener subtítulos para este episodio/película específico
-    $subtitles = $api->getSubtitles($type, $epId);
+    // Detectar subtítulos desde el filesystem (junto al vídeo o en la carpeta)
+    $subtitles = [];
+    if ($media) {
+        $videoPath = $media['video_path'] ?? '';
+        if ($videoPath && is_file($videoPath)) {
+            $subtitles = SubtitleScanner::findSubtitlesForVideo($videoPath);
+        } elseif (!empty($media['folder_path']) && is_dir($media['folder_path'])) {
+            $subtitles = SubtitleScanner::findSubtitlesInFolder($media['folder_path']);
+        }
+    }
 
     if (empty($subtitles)) {
         echo json_encode(['html' => '<p class="text-muted small mb-0"><i class="fa fa-info-circle me-1"></i>No hay subtítulos descargados.</p>']);
@@ -34,14 +45,7 @@ try {
     }
 
     // Detectar si ya tiene español
-    $hasSpanish = false;
-    foreach ($subtitles as $sub) {
-        $lang = strtolower($sub['code2'] ?? $sub['name'] ?? $sub['language'] ?? '');
-        if ($lang === 'es' || $lang === 'spa' || strpos($lang, 'spanish') !== false) {
-            $hasSpanish = true;
-            break;
-        }
-    }
+    $hasSpanish = SubtitleScanner::hasSpanish($subtitles);
 
     // Consultar historial de traducciones para este media
     $translationHistory = [];

@@ -60,7 +60,9 @@ try {
         has_spanish INTEGER DEFAULT 0,
         subtitle_path TEXT, subtitle_lang TEXT,
         season INTEGER DEFAULT 0, episode INTEGER DEFAULT 0,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sonarr_series_id TEXT, sonarr_episode_id TEXT, tvdb_id TEXT,
+        radarr_id TEXT, tmdb_id TEXT, video_path TEXT
     )");
 
     try {
@@ -77,6 +79,30 @@ try {
     }
     try {
         $pdo->exec("ALTER TABLE media_cache ADD COLUMN folder_path TEXT");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE media_cache ADD COLUMN sonarr_series_id TEXT");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE media_cache ADD COLUMN sonarr_episode_id TEXT");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE media_cache ADD COLUMN tvdb_id TEXT");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE media_cache ADD COLUMN radarr_id TEXT");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE media_cache ADD COLUMN tmdb_id TEXT");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE media_cache ADD COLUMN video_path TEXT");
     } catch (Exception $e) {
     }
 
@@ -141,9 +167,12 @@ try {
     $stmt = $pdo->query("SELECT COUNT(*) FROM settings");
     if ($stmt->fetchColumn() == 0) {
         $pdo->exec("INSERT INTO settings (setting_key, setting_value) VALUES 
-            ('media_server_type', 'bazarr'),
-            ('media_server_url', ''),
-            ('media_server_api_key', ''),
+            ('sonarr_url', ''),
+            ('sonarr_api_key', ''),
+            ('sonarr_enabled', '0'),
+            ('radarr_url', ''),
+            ('radarr_api_key', ''),
+            ('radarr_enabled', '0'),
             ('deepseek_api_key', ''),
             ('chunk_size', '50'),
             ('path_mapping_movies_from', ''),
@@ -164,31 +193,28 @@ try {
         $settings['system_prompt'] = $defaultPrompt;
     }
 
-    if (isset($settings['bazarr_url']) && !isset($settings['media_server_url'])) {
-        $settings['media_server_type'] = 'bazarr';
-        $settings['media_server_url'] = $settings['bazarr_url'];
-        $settings['media_server_api_key'] = $settings['bazarr_api_key'] ?? '';
-    }
-
-    define('MEDIA_SERVER_TYPE', $settings['media_server_type'] ?? 'bazarr');
-    define('MEDIA_SERVER_URL', rtrim($settings['media_server_url'] ?? '', '/'));
-
     require_once __DIR__ . '/includes/security.php';
 
-    $rawMediaServerApiKey = $settings['media_server_api_key'] ?? '';
+    $rawSonarrApiKey = $settings['sonarr_api_key'] ?? '';
+    $rawRadarrApiKey = $settings['radarr_api_key'] ?? '';
     $rawDeepseekApiKey = $settings['deepseek_api_key'] ?? '';
 
-    $mediaServerApiKeyDecrypted = (isEncrypted($rawMediaServerApiKey))
-        ? decryptValue($rawMediaServerApiKey)
-        : $rawMediaServerApiKey;
-
-    $deepseekApiKeyDecrypted = (isEncrypted($rawDeepseekApiKey))
+    $sonarrApiKeyDecrypted = isEncrypted($rawSonarrApiKey)
+        ? decryptValue($rawSonarrApiKey)
+        : $rawSonarrApiKey;
+    $radarrApiKeyDecrypted = isEncrypted($rawRadarrApiKey)
+        ? decryptValue($rawRadarrApiKey)
+        : $rawRadarrApiKey;
+    $deepseekApiKeyDecrypted = isEncrypted($rawDeepseekApiKey)
         ? decryptValue($rawDeepseekApiKey)
         : $rawDeepseekApiKey;
 
-    define('MEDIA_SERVER_API_KEY', $mediaServerApiKeyDecrypted);
-    define('BAZARR_URL', MEDIA_SERVER_URL);
-    define('BAZARR_API_KEY', $mediaServerApiKeyDecrypted);
+    define('SONARR_URL', rtrim($settings['sonarr_url'] ?? '', '/'));
+    define('SONARR_API_KEY', $sonarrApiKeyDecrypted);
+    define('SONARR_ENABLED', ($settings['sonarr_enabled'] ?? '0') === '1');
+    define('RADARR_URL', rtrim($settings['radarr_url'] ?? '', '/'));
+    define('RADARR_API_KEY', $radarrApiKeyDecrypted);
+    define('RADARR_ENABLED', ($settings['radarr_enabled'] ?? '0') === '1');
     define('DEEPSEEK_API_KEY', $deepseekApiKeyDecrypted);
     define('CHUNK_SIZE', (int) ($settings['chunk_size'] ?? 50));
     define('DEEPSEEK_SYSTEM_PROMPT', $settings['system_prompt'] ?? '');
@@ -200,7 +226,17 @@ try {
     define('AUTO_SCAN_ENABLED', ($settings['auto_scan_enabled'] ?? '1') === '1');
     define('SCAN_INTERVAL_MINUTES', (int) ($settings['scan_interval_minutes'] ?? 60));
 
-    foreach (['auto_scan_enabled' => '1', 'scan_interval_minutes' => '60'] as $key => $default) {
+    $defaultSettings = [
+        'sonarr_url' => '',
+        'sonarr_api_key' => '',
+        'sonarr_enabled' => '0',
+        'radarr_url' => '',
+        'radarr_api_key' => '',
+        'radarr_enabled' => '0',
+        'auto_scan_enabled' => '1',
+        'scan_interval_minutes' => '60',
+    ];
+    foreach ($defaultSettings as $key => $default) {
         if (!isset($settings[$key])) {
             $stmt = $pdo->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)");
             $stmt->execute([$key, $default]);

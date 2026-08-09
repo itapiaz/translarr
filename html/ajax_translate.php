@@ -26,7 +26,6 @@ header('Content-Type: application/json');
 header('X-Content-Type-Options: nosniff');
 
 require_once 'config.php';
-require_once 'includes/MediaServerFactory.php';
 require_once 'includes/security.php';
 
 // Rate limiting para traducción (10 peticiones por minuto)

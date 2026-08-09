@@ -7,7 +7,7 @@
  */
 ini_set('display_errors', 0);
 require_once 'config.php';
-require_once 'includes/MediaServerFactory.php';
+require_once 'includes/SubtitleScanner.php';
 require_once 'includes/security.php';
 
 header('Content-Type: application/json');
@@ -24,21 +24,15 @@ if (empty($seriesId)) {
 }
 
 try {
-    // Leer config fresh de BD (el API puede haber cambiado)
-    $cfgRows = $pdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('media_server_type','media_server_url','media_server_api_key')")->fetchAll(PDO::FETCH_KEY_PAIR);
-    $msType   = $cfgRows['media_server_type'] ?? '';
-    $msUrl    = rtrim($cfgRows['media_server_url'] ?? '', '/');
-    $msApiKey = $cfgRows['media_server_api_key'] ?? '';
-    if (isEncrypted($msApiKey)) $msApiKey = decryptValue($msApiKey);
-    $api = MediaServerFactory::getAPI($msType, $msUrl, $msApiKey);
-
     // Obtener título de la serie
     $stmtS = $pdo->prepare("SELECT title FROM media_cache WHERE id = ? AND type='series'");
     $stmtS->execute([$seriesId]);
     $seriesTitle = $stmtS->fetchColumn() ?: '';
 
-    // Obtener todos los episodios de la serie
-    $episodes = $api->getEpisodes($seriesId);
+    // Obtener todos los episodios de la serie desde la caché
+    $epsStmt = $pdo->prepare("SELECT * FROM media_cache WHERE series_id = ? AND type='episode' ORDER BY season ASC, episode ASC");
+    $epsStmt->execute([$seriesId]);
+    $episodes = $epsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $encolados = 0;
     $sinIngles = 0;
@@ -54,30 +48,21 @@ try {
             continue;
         }
 
-        // Obtener subtítulos del episodio
-        $subtitles = $api->getSubtitles('series', $mediaId);
+        // Detectar subtítulos desde el filesystem (junto al vídeo o en la carpeta)
+        $videoPath = $ep['video_path'] ?? '';
+        $subtitles = [];
+        if ($videoPath && is_file($videoPath)) {
+            $subtitles = SubtitleScanner::findSubtitlesForVideo($videoPath);
+        } elseif (!empty($ep['folder_path']) && is_dir($ep['folder_path'])) {
+            $subtitles = SubtitleScanner::findSubtitlesInFolder($ep['folder_path']);
+        }
 
         // Buscar subtítulo en inglés
-        $englishSub = null;
-        foreach ($subtitles as $sub) {
-            $lang = strtolower($sub['code2'] ?? $sub['name'] ?? $sub['language'] ?? '');
-            if (in_array($lang, ['en', 'eng', 'english'])) {
-                $englishSub = $sub;
-                break;
-            }
-        }
+        $englishSub = SubtitleScanner::englishSubtitle($subtitles);
         if (!$englishSub || empty($englishSub['path'])) { $sinIngles++; continue; }
 
         // Double-check español
-        $hasSpanish = false;
-        foreach ($subtitles as $sub) {
-            $lang = strtolower($sub['code2'] ?? $sub['name'] ?? $sub['language'] ?? '');
-            if (in_array($lang, ['es', 'spa']) || strpos($lang, 'spanish') !== false) {
-                $hasSpanish = true;
-                break;
-            }
-        }
-        if ($hasSpanish) { $yaEspañol++; continue; }
+        if (SubtitleScanner::hasSpanish($subtitles)) { $yaEspañol++; continue; }
 
         $path = $englishSub['path'];
         if (!file_exists($path)) { $sinIngles++; continue; }
