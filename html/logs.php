@@ -137,7 +137,10 @@ if (file_exists($workerLogPath)) {
     <div class="col-6 col-md-3">
         <div class="card glass-card h-100">
             <div class="card-body text-center">
-                <div class="fs-6 fw-bold text-warning"><?= $summary['lastScan'] ? '<small class="utc-date">' . htmlspecialchars($summary['lastScan']) . '</small>' : 'Sin escaneo' ?></div>
+                <button type="button" id="btnScanNow" class="btn btn-outline-info btn-sm">
+                    <i class="fa fa-refresh me-1"></i>Escanear ahora
+                </button>
+                <div class="mt-2 text-muted small utc-date"><?= $summary['lastScan'] ? htmlspecialchars($summary['lastScan']) : 'Sin escaneo' ?></div>
                 <div class="text-muted small">Último escaneo</div>
             </div>
         </div>
@@ -375,6 +378,33 @@ document.addEventListener('DOMContentLoaded', function() {
     updateTranslationProgress();
     // Polling mientras haya traducciones activas
     setInterval(updateTranslationProgress, 5000);
+
+    // ===== Escanear ahora =====
+    const btnScan = document.getElementById('btnScanNow');
+    if (btnScan) {
+        btnScan.addEventListener('click', function () {
+            const original = this.innerHTML;
+            this.disabled = true;
+            this.innerHTML = '<i class="fa fa-spinner fa-spin me-1"></i>Iniciando...';
+            fetch('ajax_tasks.php?action=trigger')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        this.innerHTML = '<i class="fa fa-check me-1"></i>Encolado';
+                        setTimeout(() => { this.innerHTML = original; this.disabled = false; }, 2500);
+                    } else {
+                        alert(data.message || 'Error al iniciar el escaneo.');
+                        this.innerHTML = original;
+                        this.disabled = false;
+                    }
+                })
+                .catch(() => {
+                    alert('Error de conexión.');
+                    this.innerHTML = original;
+                    this.disabled = false;
+                });
+        });
+    }
 });
 </script>
 

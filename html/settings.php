@@ -240,7 +240,6 @@ foreach ($providerLabels as $pk => $pl) {
         <div class="nav flex-column nav-pills glass-card p-3" id="settings-tabs" role="tablist" aria-orientation="vertical">
             <button class="nav-link active text-start mb-2" id="tab-server" data-bs-toggle="pill" data-bs-target="#pane-server" type="button" role="tab" style="color: #fff;"><i class="fa fa-server me-2 text-info"></i> Sonarr / Radarr</button>
             <button class="nav-link text-start mb-2" id="tab-ai" data-bs-toggle="pill" data-bs-target="#pane-ai" type="button" role="tab" style="color: #fff;"><i class="fa fa-bolt me-2 text-warning"></i> IA / Traducción</button>
-            <button class="nav-link text-start mb-2" id="tab-tasks" data-bs-toggle="pill" data-bs-target="#pane-tasks" type="button" role="tab" style="color: #fff;"><i class="fa fa-clock-o me-2 text-success"></i> Tareas Programadas</button>
             <button class="nav-link text-start mb-4" id="tab-security" data-bs-toggle="pill" data-bs-target="#pane-security" type="button" role="tab" style="color: #fff;"><i class="fa fa-lock me-2 text-danger"></i> Seguridad</button>
             <a href="logs.php" class="nav-link text-start border border-info text-info mt-2" style="background: rgba(0, 242, 254, 0.05);"><i class="fa fa-terminal me-2"></i> Logs del Sistema</a>
         </div>
@@ -453,35 +452,7 @@ foreach ($providerLabels as $pk => $pl) {
                     </form>
                 </div><!-- /pane-ai -->
 
-            <!-- PANE 3: TAREAS PROGRAMADAS -->
-            <div class="tab-pane fade" id="pane-tasks" role="tabpanel">
-                <div class="card glass-card mb-4">
-                    <div class="card-body p-4">
-                        <h4 class="mb-4 text-success"><i class="fa fa-clock-o"></i> Tareas Programadas</h4>
-                        
-                        <div class="alert alert-secondary mb-4 border-secondary d-flex align-items-center">
-                            <i class="fa fa-info-circle fa-2x me-3 text-info"></i>
-                            <div>
-                                <strong>Escaneo automático de medios: <span class="badge bg-success ms-1">Activo</span></strong><br>
-                                <small class="text-muted">El escaneo se ejecuta cada 60 minutos en background. Detecta nuevos subtítulos, aplica heurística de idioma y renueva la caché de medios.</small>
-                            </div>
-                            <button class="btn btn-gradient ms-auto" id="btnManualScan" onclick="manualScanFromSettings()">
-                                <i class="fa fa-refresh me-1"></i>Ejecutar ahora
-                            </button>
-                        </div>
-
-                        <h6 class="text-secondary mb-3"><i class="fa fa-history me-1"></i>Últimas ejecuciones</h6>
-                        <div id="scanHistory" class="border border-secondary rounded p-0 overflow-hidden">
-                            <div class="text-center text-muted py-4">
-                                <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-                                <p class="mt-2 small">Cargando historial...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- PANE 4: SEGURIDAD -->
+                <!-- PANE 3: SEGURIDAD -->
             <div class="tab-pane fade" id="pane-security" role="tabpanel">
                 <div class="card glass-card mb-4">
                     <div class="card-body p-4">
@@ -930,63 +901,5 @@ document.getElementById('btnSelectPath').addEventListener('click', function() {
     }
     browserModal.hide();
 });
-
-// ===== HISTORIAL DE ESCANEOS =====
-async function loadScanHistory() {
-    try {
-        const res = await fetch('ajax_tasks.php?action=history');
-        const data = await res.json();
-        const el = document.getElementById('scanHistory');
-        if (!data.tasks || data.tasks.length === 0) {
-            el.innerHTML = '<p class="text-muted text-center small mb-0">No hay ejecuciones recientes.</p>';
-            return;
-        }
-        let html = '<table class="table table-dark table-sm mb-0" style="font-size:0.82rem">';
-        html += '<thead><tr><th>Tipo</th><th>Estado</th><th>Resultado</th><th>Inicio</th><th>Duración</th></tr></thead><tbody>';
-        data.tasks.forEach(t => {
-            const statusMap = {pending:'<span class="badge bg-secondary">Pendiente</span>',running:'<span class="badge bg-info">Ejecutando</span>',done:'<span class="badge bg-success">OK</span>',error:'<span class="badge bg-danger">Error</span>'};
-            const duration = (t.started_at && t.finished_at)
-                ? Math.round((new Date(t.finished_at + ' UTC') - new Date(t.started_at + ' UTC')) / 1000) + 's'
-                : '-';
-            const start = t.started_at ? new Date(t.started_at + ' UTC').toLocaleString('es') : '-';
-            const typeMap = {scan_media: 'Escaneo', translate: 'Traducción', rename_subtitle: 'Renombrado'};
-            html += `<tr>
-                <td>${typeMap[t.type] || t.type}</td>
-                <td>${statusMap[t.status] || t.status}</td>
-                <td class="text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.result || '-'}</td>
-                <td>${start}</td>
-                <td>${duration}</td>
-            </tr>`;
-        });
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    } catch(e) {
-        document.getElementById('scanHistory').innerHTML = '<p class="text-danger small mb-0">Error al cargar historial.</p>';
-    }
-}
-
-async function manualScanFromSettings() {
-    const btn = document.getElementById('btnManualScan');
-    btn.disabled = true;
-    btn.innerHTML = '<div class="spinner-border spinner-border-sm me-1"></div>Iniciando...';
-    try {
-        const res = await fetch('ajax_tasks.php?action=trigger');
-        const data = await res.json();
-        if (data.success) {
-            setTimeout(() => loadScanHistory(), 2000);
-        } else {
-            alert(data.message || 'Error al iniciar el escaneo.');
-        }
-    } catch(e) {
-        alert('Error de conexión.');
-    }
-    setTimeout(() => {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa fa-refresh me-1"></i>Ejecutar ahora';
-    }, 2500);
-}
-
-// Cargar historial al cargar la página
-loadScanHistory();
 
 </script>
