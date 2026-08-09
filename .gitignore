@@ -1,0 +1,33 @@
+# Runtime configuration, secrets, certificates, logs, and SQLite data
+/config/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.key
+*.pem
+*.crt
+*.log
+*.lock
+
+# Legacy MariaDB data directory
+/db_data/
+
+# Local archives and backups
+*.zip
+*.tar
+*.tar.gz
+*.bak
+*.backup
+*.corrupt
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
+*~

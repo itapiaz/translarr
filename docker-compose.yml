@@ -1,0 +1,17 @@
+services:
+  translarr:
+    build: .
+    image: translarr:latest
+    container_name: translarr
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=America/Lima
+    volumes:
+      - ./config:/config
+      - ./html:/app/www/public
+      - /home/media/movies:/home/media/movies
+      - /home/media/tvshows:/home/media/tvshows
+    ports:
+      - "4646:80"
+    restart: unless-stopped
