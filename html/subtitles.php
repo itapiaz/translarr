@@ -337,17 +337,10 @@ async function startTranslation(type, mediaId, seriesId, path, btnElement) {
     if (translatingIds.has(mediaId)) return;
     translatingIds.add(mediaId);
 
+    // Estado: enviando solicitud (solo spinner)
     btnElement.disabled = true;
-    btnElement.innerHTML = '<i class="fa fa-clock-o me-1"></i>En cola...';
-
-    // Buscar o crear el contenedor de estado
-    let statusEl = document.getElementById('translate-status-' + mediaId);
-    if (!statusEl) {
-        statusEl = document.createElement('div');
-        statusEl.id = 'translate-status-' + mediaId;
-        statusEl.className = 'mt-1 small';
-        btnElement.parentNode.appendChild(statusEl);
-    }
+    btnElement.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+    btnElement.title = 'Encolando traducción...';
 
     try {
         const dataInit = await postJSON('ajax_translate.php', {
@@ -355,7 +348,9 @@ async function startTranslation(type, mediaId, seriesId, path, btnElement) {
         });
         if (dataInit.status !== 'success') throw new Error(dataInit.message || 'Error al iniciar');
 
-        statusEl.innerHTML = '<span class="text-info"><i class="fa fa-check-circle me-1"></i>Traducción agregada a la cola de tareas.</span>';
+        // Encolada: un único icono de reloj
+        btnElement.innerHTML = '<i class="fa fa-clock-o"></i>';
+        btnElement.title = 'Traducción en cola';
 
         // Consultar estado cada 10 segundos para actualizar cuando termine
         const jobId = dataInit.job_id;
@@ -366,26 +361,27 @@ async function startTranslation(type, mediaId, seriesId, path, btnElement) {
             if (statusData.translation_status === 'completed') {
                 clearInterval(checkInterval);
                 translatingIds.delete(mediaId);
-                statusEl.innerHTML = '<span class="text-success"><i class="fa fa-check-circle me-1"></i>Traducción completada! <span class="text-muted">Recargando...</span></span>';
-                setTimeout(() => { window.location.reload(); }, 2000);
+                btnElement.innerHTML = '<i class="fa fa-check-circle"></i>';
+                btnElement.title = 'Traducción completada';
+                setTimeout(() => { window.location.reload(); }, 1500);
             } else if (statusData.translation_status === 'error') {
                 clearInterval(checkInterval);
                 translatingIds.delete(mediaId);
-                statusEl.innerHTML = '<span class="text-danger"><i class="fa fa-exclamation-circle me-1"></i>Error: ' + (statusData.result || 'desconocido') + '</span>';
                 btnElement.disabled = false;
-                btnElement.innerHTML = '<i class="fa fa-language me-1"></i> Reintentar';
-                btnElement.classList.remove('btn-outline-info');
-                btnElement.classList.add('btn-outline-warning');
+                btnElement.innerHTML = '<i class="fa fa-exclamation-triangle"></i>';
+                btnElement.title = 'Error al traducir. Pulsa para reintentar.';
+                btnElement.classList.remove('btn-outline-info', 'btn-outline-warning');
+                btnElement.classList.add('btn-outline-danger');
             }
         }, 10000);
 
     } catch (e) {
         translatingIds.delete(mediaId);
-        statusEl.innerHTML = '<span class="text-danger"><i class="fa fa-exclamation-circle me-1"></i>Error: ' + e.message + '</span>';
         btnElement.disabled = false;
-        btnElement.innerHTML = '<i class="fa fa-language me-1"></i> Reintentar';
-        btnElement.classList.remove('btn-outline-info');
-        btnElement.classList.add('btn-outline-warning');
+        btnElement.innerHTML = '<i class="fa fa-exclamation-triangle"></i>';
+        btnElement.title = 'Error: ' + (e.message || 'desconocido') + ' - Pulsa para reintentar';
+        btnElement.classList.remove('btn-outline-info', 'btn-outline-warning');
+        btnElement.classList.add('btn-outline-danger');
     }
 }
 
