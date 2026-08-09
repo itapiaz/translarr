@@ -131,6 +131,7 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
                     </div>
                 </div>
                 <div class="text-end">
+                    <h5 class="mb-1 text-muted"><i class="fa fa-bolt me-2"></i>Acciones</h5>
                     <button type="button" id="movie-translate-btn" class="btn btn-sm btn-outline-info translate-icon-btn" disabled title="Cargando...">
                         <i class="fa fa-language"></i>
                     </button>
