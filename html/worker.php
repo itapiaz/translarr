@@ -36,7 +36,33 @@ function freshPDO(): PDO {
     $pdo = new PDO("sqlite:" . $dbPath);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->exec("PRAGMA busy_timeout=30000;");
+    $pdo->exec("PRAGMA journal_mode=WAL;");
     return $pdo;
+}
+
+/**
+ * Ejecuta una operación SQLite con reintentos ante bloqueos transitorios
+ * ("database is locked" / "database table is locked"). Devuelve el resultado
+ * de la última llamada o lanza la excepción si no prospera.
+ */
+function retryDb(callable $fn, int $attempts = 5, float $delaySec = 0.4) {
+    $last = null;
+    for ($i = 1; $i <= $attempts; $i++) {
+        try {
+            return $fn();
+        } catch (Exception $e) {
+            $last = $e;
+            $msg = strtolower($e->getMessage());
+            if (strpos($msg, 'locked') === false) {
+                throw $e; // no es un bloqueo, no reintentar
+            }
+            if ($i < $attempts) {
+                workerLog("  DB bloqueada, reintento $i/$attempts...");
+                usleep((int) ($delaySec * 1000000));
+            }
+        }
+    }
+    throw $last;
 }
 
 // === MIGRACIONES DE ESQUEMA ===
@@ -57,6 +83,22 @@ foreach ($_migrations as $_sql) {
 $_migPdo = null;
 unset($_migrations, $_sql, $_e);
 // === FIN MIGRACIONES ===
+
+// === RECUPERACIÓN DE TAREAS HUÉRFANAS ===
+// Al arrancar, cualquier tarea que quedó 'running' (por reinicio del worker,
+// del contenedor o despliegue) se marca como 'error' para no bloquear la cola.
+$orphanPdo = freshPDO();
+try {
+    $n1 = $orphanPdo->exec("UPDATE background_tasks SET status='error', result='Worker reiniciado o tarea interrumpida', finished_at=CURRENT_TIMESTAMP WHERE type='translate' AND status='running'");
+    $n2 = $orphanPdo->exec("UPDATE translation_log SET status='error', result='Worker reiniciado o tarea interrumpida', finished_at=CURRENT_TIMESTAMP WHERE status='running'");
+    if ($n1 > 0 || $n2 > 0) {
+        workerLog("Recuperadas tareas huérfanas: background_tasks=$n1, translation_log=$n2");
+    }
+} catch (Exception $e) {
+    workerLog("Error recuperando tareas huérfanas: ".$e->getMessage());
+}
+$orphanPdo = null;
+// === FIN RECUPERACIÓN ===
 
 
 function doScanMedia(): string {
@@ -370,16 +412,19 @@ function doTrans(int $taskId, string $payloadJson): void {
     $total = count($chunks);
 
     for ($i = 0; $i < $total; $i++) {
+        $chunkStart = microtime(true);
         workerLog("  Chunk ".($i+1)."/$total...");
         $translated = false;
         $lastErr = '';
         // Intentar con cada candidato, empezando por el principal
         foreach ($candidates as $cand) {
+            $candStart = microtime(true);
             try {
                 $out = $cand['provider']->translate($cand['model'], $systemPrompt, implode("\n\n", $chunks[$i]));
             } catch (Exception $e) {
                 $lastErr = $e->getMessage();
-                workerLog("    {$cand['key']} falló: ".$e->getMessage());
+                $dur = round(microtime(true) - $candStart, 1);
+                workerLog("    {$cand['key']} falló ({$dur}s): ".$e->getMessage());
                 // Reordenar: mover el candidato que falló al final para no repetirlo sin motivo
                 $first = array_shift($candidates);
                 $candidates[] = $first;
@@ -396,12 +441,15 @@ function doTrans(int $taskId, string $payloadJson): void {
             $providerKey = $cand['key'];
             $model = $cand['model'];
             $translated = true;
+            $dur = round(microtime(true) - $candStart, 1);
+            workerLog("    {$cand['key']} OK ({$dur}s)");
             break;
         }
 
         if (!$translated) {
-            workerLog("  Error: todos los proveedores fallaron ($lastErr)");
-            markError($logId, "Todos los proveedores fallaron: $lastErr");
+            $chunkDur = round(microtime(true) - $chunkStart, 1);
+            workerLog("  Error: todos los proveedores fallaron en chunk ".($i+1)." ({$chunkDur}s): $lastErr");
+            markError($logId, "Error en chunk ".($i+1)."/$total: $lastErr");
             return;
         }
 
@@ -449,21 +497,29 @@ function doTrans(int $taskId, string $payloadJson): void {
     }
     
     // Marcar completado
-    $pdo = freshPDO();
-    $pdo->beginTransaction();
-    $jobType = strtolower(trim($job['type'] ?? ''));
-    if ($jobType === 'movie' || $jobType === 'movies') {
-        $pdo->prepare("UPDATE movies SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
-    } else {
-        $pdo->prepare("UPDATE episodes SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
+    try {
+        retryDb(function () use ($job, $jobId, $logId, $providerKey, $model) {
+            $pdo = freshPDO();
+            $pdo->beginTransaction();
+            $jobType = strtolower(trim($job['type'] ?? ''));
+            if ($jobType === 'movie' || $jobType === 'movies') {
+                $pdo->prepare("UPDATE movies SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
+            } else {
+                $pdo->prepare("UPDATE episodes SET has_spanish=1 WHERE id=?")->execute([$job['media_id']]);
+            }
+            if ($logId) {
+                $upd = $pdo->prepare("UPDATE translation_log SET status='completed', finished_at=CURRENT_TIMESTAMP, provider=?, model=? WHERE id=?");
+                $upd->execute([$providerKey, $model, $logId]);
+            }
+            $pdo->prepare("DELETE FROM translation_jobs WHERE job_id=?")->execute([$jobId]);
+            $pdo->commit();
+            $pdo = null;
+        });
+    } catch (Exception $e) {
+        workerLog("  Error marcando completado: ".$e->getMessage());
+        markError($logId, "Completado con error de BD: ".$e->getMessage());
+        return;
     }
-    if ($logId) {
-        $upd = $pdo->prepare("UPDATE translation_log SET status='completed', finished_at=CURRENT_TIMESTAMP, provider=?, model=? WHERE id=?");
-        $upd->execute([$providerKey, $model, $logId]);
-    }
-    $pdo->prepare("DELETE FROM translation_jobs WHERE job_id=?")->execute([$jobId]);
-    $pdo->commit();
-    $pdo = null;
     workerLog("  OK ($total chunks)");
 }
 

@@ -47,7 +47,7 @@ abstract class AbstractTranslationProvider implements TranslationProviderInterfa
     /**
      * Petición POST JSON con cabeceras base (Authorization, Content-Type).
      */
-    protected function postJson(string $url, array $body, array $headers = [], int $timeout = 300): array
+    protected function postJson(string $url, array $body, array $headers = [], int $timeout = 90): array
     {
         $defaultHeaders = array_merge([
             'Content-Type: application/json',
