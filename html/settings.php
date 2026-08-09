@@ -81,7 +81,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? $_POST['translation_provider']
             : 'deepseek';
         $model = trim($_POST['translation_model'] ?? '');
-        $fallbackProviders = trim($_POST['translation_fallback_providers'] ?? '');
+
+        // Modelos de respaldo en orden: pares proveedor/modelo seleccionados en la UI.
+        $fallbackModels = [];
+        $rawFallbackModelsJson = trim($_POST['translation_fallback_models'] ?? '');
+        $decodedFallback = json_decode($rawFallbackModelsJson, true);
+        if (is_array($decodedFallback)) {
+            foreach ($decodedFallback as $item) {
+                $fp = strtolower(trim($item['provider'] ?? ''));
+                $fm = trim($item['model'] ?? '');
+                if (!in_array($fp, ['deepseek', 'gemini', 'openai', 'mistral'], true)) continue;
+                if ($fm === '') continue;
+                // Evitar duplicados de una misma combinación proveedor/modelo
+                $exists = false;
+                foreach ($fallbackModels as $existing) {
+                    if ($existing['provider'] === $fp && $existing['model'] === $fm) { $exists = true; break; }
+                }
+                if (!$exists) $fallbackModels[] = ['provider' => $fp, 'model' => $fm];
+            }
+        }
+        $fallbackModelsJson = json_encode($fallbackModels);
 
         // Guardar cada API key (conservando la cifrada si no cambió)
         $keys = ['deepseek', 'gemini', 'openai', 'mistral'];
@@ -103,7 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $stmt->execute(['translation_provider', $provider]);
             $stmt->execute(['translation_model', $model]);
-            $stmt->execute(['translation_fallback_providers', $fallbackProviders]);
+            $stmt->execute(['translation_fallback_models', $fallbackModelsJson]);
+            $stmt->execute(['translation_fallback_providers', '']);
             $stmt->execute(['system_prompt', $systemPrompt]);
             $stmt->execute(['chunk_size', $chunkSize]);
             $pdo->commit();
@@ -155,7 +175,6 @@ $currentMistralApiKey = (!empty($currentMistralApiKeyRaw) && isEncrypted($curren
     : $currentMistralApiKeyRaw;
 $currentTranslationProvider = $currentSettings['translation_provider'] ?? 'deepseek';
 $currentTranslationModel = $currentSettings['translation_model'] ?? '';
-$currentFallbackProviders = $currentSettings['translation_fallback_providers'] ?? '';
 $currentSystemPrompt = $currentSettings['system_prompt'] ?? '';
 $currentChunkSize = $currentSettings['chunk_size'] ?? '50';
 $currentPathMappingMoviesFrom = $currentSettings['path_mapping_movies_from'] ?? '';
@@ -165,27 +184,41 @@ $currentPathMappingSeriesTo = $currentSettings['path_mapping_series_to'] ?? '';
 $currentAutoScan = $currentSettings['auto_scan_enabled'] ?? '1';
 $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
 
-// Resumen de proveedores configurados y modelos cacheados
+// Modelos registrados de IA (caché SQLite) y etiquetas de proveedor
 require_once 'includes/TranslationProviderFactory.php';
 require_once 'includes/TranslationModelRepository.php';
-$providerSummary = [];
 $providerLabels = ['deepseek' => 'DeepSeek', 'gemini' => 'Google Gemini', 'openai' => 'OpenAI', 'mistral' => 'Mistral AI'];
+
+// Modelos de respaldo configurados (pares proveedor/modelo) y su estado actual
+$currentFallbackModelsJson = $currentSettings['translation_fallback_models'] ?? '';
+$currentFallbackModels = [];
+if ($currentFallbackModelsJson !== '') {
+    $dec = json_decode($currentFallbackModelsJson, true);
+    if (is_array($dec)) {
+        foreach ($dec as $item) {
+            $p = strtolower(trim($item['provider'] ?? ''));
+            $m = trim($item['model'] ?? '');
+            if ($p === '' || $m === '') continue;
+            $currentFallbackModels[] = ['provider' => $p, 'model' => $m];
+        }
+    }
+}
+
+// Todos los modelos registrados y seleccionables, agrupados por proveedor,
+// para el selector de modelos de respaldo. Se excluye el modelo principal exacto.
+$fallbackAllModels = [];
 foreach ($providerLabels as $pk => $pl) {
-    $rawKey = $currentSettings[$pk . '_api_key'] ?? '';
-    $hasKey = !empty($rawKey);
     $models = TranslationModelRepository::get($pdo, $pk);
-    $sync = TranslationModelRepository::syncStatus($pdo, $pk);
-    $selectable = 0;
-    foreach ($models as $m) { if ((int)$m['is_selectable'] === 1) $selectable++; }
-    $providerSummary[$pk] = [
-        'label'      => $pl,
-        'hasKey'     => $hasKey,
-        'isActive'   => ($currentTranslationProvider === $pk),
-        'total'      => count($models),
-        'selectable' => $selectable,
-        'fetchedAt'  => $sync['fetched_at'] ?? null,
-        'syncStatus' => $sync['status'] ?? null,
-    ];
+    foreach ($models as $m) {
+        if ((int)$m['is_selectable'] !== 1) continue;
+        if ($pk === $currentTranslationProvider && $m['model_id'] === $currentTranslationModel) continue;
+        $fallbackAllModels[] = [
+            'provider'       => $pk,
+            'provider_label' => $pl,
+            'model_id'       => $m['model_id'],
+            'display_name'   => $m['display_name'],
+        ];
+    }
 }
 ?>
 
@@ -372,10 +405,31 @@ foreach ($providerLabels as $pk => $pl) {
                             </div>
 
                             <div class="mb-4">
-                                <label for="translation_fallback_providers" class="form-label">Proveedores de respaldo (fallback)</label>
-                                <input type="text" class="form-control" id="translation_fallback_providers" name="translation_fallback_providers"
-                                       value="<?= htmlspecialchars($currentFallbackProviders) ?>" placeholder="gemini,mistral,openai">
-                                <div class="form-text text-muted">Si el proveedor activo falla (clave inválida, límite, red), TransLarr probará automáticamente estos proveedores en orden. Sepáralos con comas.</div>
+                                <label class="form-label">Modelos de respaldo (fallback)</label>
+                                <div class="form-text text-muted mb-2">Si el proveedor/modelo activo falla (clave inválida, límite, red), TransLarr intentará estos modelos en el orden indicado. Solo se muestran modelos registrados y aptos para subtítulos.</div>
+                                <div class="input-group mb-2">
+                                    <select class="form-select" id="fallback_model_select">
+                                        <option value="">— Selecciona un modelo —</option>
+                                        <?php
+                                        $lastProvider = null;
+                                        foreach ($fallbackAllModels as $fm):
+                                            if ($fm['provider'] !== $lastProvider):
+                                                if ($lastProvider !== null) echo '</optgroup>';
+                                                echo '<optgroup label="' . htmlspecialchars($fm['provider_label']) . '">';
+                                                $lastProvider = $fm['provider'];
+                                            endif;
+                                        ?>
+                                            <option value="<?= htmlspecialchars($fm['provider']) ?>::<?= htmlspecialchars($fm['model_id']) ?>"
+                                                    data-label="<?= htmlspecialchars($fm['display_name']) ?>"><?= htmlspecialchars($fm['display_name']) ?></option>
+                                        <?php endforeach;
+                                            if ($lastProvider !== null) echo '</optgroup>';
+                                        ?>
+                                    </select>
+                                    <button type="button" class="btn btn-outline-info" id="btn-add-fallback"><i class="fa fa-plus me-1"></i> Añadir</button>
+                                </div>
+                                <ul class="list-group" id="fallback-list" style="max-height:260px;overflow-y:auto;"></ul>
+                                <input type="hidden" id="translation_fallback_models" name="translation_fallback_models" value="<?= htmlspecialchars($currentFallbackModelsJson) ?>">
+                                <div class="form-text text-muted mt-1">Los respaldos se intentarán en el orden de esta lista. Usa ↑/↓ para reordenar y × para quitar.</div>
                             </div>
 
                             <div class="mb-4">
@@ -397,50 +451,6 @@ foreach ($providerLabels as $pk => $pl) {
                         <button type="submit" class="btn btn-gradient btn-lg w-100 shadow"><i class="fa fa-save me-2"></i> Guardar IA / Traducción</button>
                     </div>
                     </form>
-
-<!-- PANE 2b: PROVEEDORES Y MODELOS DISPONIBLES -->
-<div class="card glass-card mb-4">
-    <div class="card-header bg-dark border-secondary text-purple fw-bold">
-        <i class="fa fa-cubes"></i> Proveedores y modelos disponibles
-    </div>
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-dark table-hover align-middle mb-0" style="font-size: 0.85rem;">
-                <thead>
-                    <tr>
-                        <th>Proveedor</th>
-                        <th style="width:130px;">API Key</th>
-                        <th style="width:90px;">Modelos</th>
-                        <th style="width:90px;">Aptos</th>
-                        <th style="width:160px;">Última sincronización</th>
-                        <th style="width:90px;">Activo</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($providerSummary as $pk => $ps): ?>
-                        <tr class="<?= $ps['isActive'] ? 'table-primary' : '' ?>">
-                            <td><strong><?= htmlspecialchars($ps['label']) ?></strong></td>
-                            <td>
-                                <?php if ($ps['hasKey']): ?>
-                                    <span class="badge bg-success"><i class="fa fa-check"></i> Configurada</span>
-                                <?php else: ?>
-                                    <span class="badge bg-secondary">Sin guardar</span>
-                                <?php endif; ?>
-                            </td>
-                            <td><?= (int)$ps['total'] ?></td>
-                            <td><?= (int)$ps['selectable'] ?></td>
-                            <td class="text-muted"><small><?= $ps['fetchedAt'] ? htmlspecialchars($ps['fetchedAt']) : '—' ?></small></td>
-                            <td><?= $ps['isActive'] ? '<span class="badge bg-info">Sí</span>' : '<span class="text-muted">No</span>' ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-        <div class="card-body pt-2 small text-muted">
-            <i class="fa fa-info-circle"></i> Los proveedores cloud no instalan modelos localmente: TransLarr descubre los modelos de cada API y los guarda en caché. Marca una clave como "Configurada" al pulsar "Guardar IA / Traducción".
-        </div>
-    </div>
-</div>
                 </div><!-- /pane-ai -->
 
             <!-- PANE 3: TAREAS PROGRAMADAS -->
@@ -758,6 +768,113 @@ if (btnTest) {
             .finally(() => { this.disabled = false; });
     });
 }
+
+// ===== Modelos de respaldo (fallback) =====
+const FALLBACK_PROVIDER_LABELS = { deepseek: 'DeepSeek', gemini: 'Google Gemini', openai: 'OpenAI', mistral: 'Mistral AI' };
+const fallbackModelSelect = document.getElementById('fallback_model_select');
+const fallbackListEl = document.getElementById('fallback-list');
+const fallbackInput = document.getElementById('translation_fallback_models');
+
+// Mapa "provider::model" -> display_name para mostrar nombres legibles
+const fallbackLabelMap = {};
+if (fallbackModelSelect) {
+    fallbackModelSelect.querySelectorAll('option').forEach(o => {
+        if (o.value) fallbackLabelMap[o.value] = o.getAttribute('data-label') || o.textContent;
+    });
+}
+
+// Lista de respaldos en memoria, inicializada desde el hidden input
+let fallbackList = [];
+if (fallbackInput) {
+    try {
+        const parsed = JSON.parse(fallbackInput.value || '[]');
+        if (Array.isArray(parsed)) fallbackList = parsed;
+    } catch (e) { fallbackList = []; }
+}
+
+function fallbackSyncInput() {
+    if (!fallbackInput) return;
+    fallbackInput.value = JSON.stringify(
+        fallbackList.map(i => ({ provider: i.provider, model: i.model }))
+    );
+}
+
+function fallbackRender() {
+    if (!fallbackListEl) return;
+    fallbackListEl.innerHTML = '';
+    if (fallbackList.length === 0) {
+        const li = document.createElement('li');
+        li.className = 'list-group-item bg-transparent text-muted border-secondary';
+        li.textContent = 'Sin modelos de respaldo configurados.';
+        fallbackListEl.appendChild(li);
+    } else {
+        fallbackList.forEach((item, idx) => {
+            const key = item.provider + '::' + item.model;
+            const label = fallbackLabelMap[key] || item.model;
+            const providerLabel = FALLBACK_PROVIDER_LABELS[item.provider] || item.provider;
+            const li = document.createElement('li');
+            li.className = 'list-group-item bg-transparent text-light border-secondary d-flex align-items-center';
+            li.innerHTML =
+                '<span class="badge bg-secondary me-2">' + (idx + 1) + '</span>' +
+                '<span class="flex-grow-1"><strong>' + providerLabel + '</strong> — ' + label + '</span>' +
+                '<button type="button" class="btn btn-sm btn-outline-light ms-1" data-act="up" title="Subir"><i class="fa fa-arrow-up"></i></button>' +
+                '<button type="button" class="btn btn-sm btn-outline-light ms-1" data-act="down" title="Bajar"><i class="fa fa-arrow-down"></i></button>' +
+                '<button type="button" class="btn btn-sm btn-outline-danger ms-1" data-act="remove" title="Quitar"><i class="fa fa-times"></i></button>';
+            fallbackListEl.appendChild(li);
+        });
+    }
+    fallbackSyncInput();
+}
+
+if (fallbackListEl) {
+    fallbackListEl.addEventListener('click', function (e) {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const li = btn.closest('li');
+        const idx = Array.prototype.indexOf.call(fallbackListEl.children, li);
+        if (idx < 0) return;
+        const act = btn.getAttribute('data-act');
+        if (act === 'up' && idx > 0) {
+            [fallbackList[idx - 1], fallbackList[idx]] = [fallbackList[idx], fallbackList[idx - 1]];
+        } else if (act === 'down' && idx < fallbackList.length - 1) {
+            [fallbackList[idx + 1], fallbackList[idx]] = [fallbackList[idx], fallbackList[idx + 1]];
+        } else if (act === 'remove') {
+            fallbackList.splice(idx, 1);
+        }
+        fallbackRender();
+    });
+}
+
+const btnAddFallback = document.getElementById('btn-add-fallback');
+if (btnAddFallback && fallbackModelSelect) {
+    btnAddFallback.addEventListener('click', function () {
+        const val = fallbackModelSelect.value;
+        if (!val) {
+            uiAiFeedback('Selecciona un modelo para añadir como respaldo.', 'err');
+            return;
+        }
+        const sep = val.indexOf('::');
+        const provider = val.slice(0, sep);
+        const model = val.slice(sep + 2);
+        const primaryProvider = providerSelect.value;
+        const primaryModel = document.getElementById('translation_model').value;
+        if (provider === primaryProvider && model === primaryModel) {
+            uiAiFeedback('Ese ya es el modelo principal.', 'err');
+            return;
+        }
+        if (fallbackList.some(i => i.provider === provider && i.model === model)) {
+            uiAiFeedback('Ese modelo ya está en la lista de respaldo.', 'err');
+            return;
+        }
+        fallbackList.push({ provider: provider, model: model });
+        fallbackRender();
+        fallbackModelSelect.value = '';
+        uiAiFeedback('Modelo de respaldo añadido.', 'ok');
+    });
+}
+
+// Render inicial
+fallbackRender();
 
 // Explorador Local
 const browserModal = new bootstrap.Modal(document.getElementById('browserModal'));

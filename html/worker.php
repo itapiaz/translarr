@@ -269,7 +269,7 @@ function doTrans(int $taskId, string $payloadJson): void {
     
     // Leer config fresca del proveedor desde BD (el worker puede haber arrancado antes de guardarla)
     $pdoCfg = freshPDO();
-    $cfgRows = $pdoCfg->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('system_prompt','translation_provider','translation_model','translation_fallback_providers','deepseek_api_key','gemini_api_key','openai_api_key','mistral_api_key')")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $cfgRows = $pdoCfg->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('system_prompt','translation_provider','translation_model','translation_fallback_models','translation_fallback_providers','deepseek_api_key','gemini_api_key','openai_api_key','mistral_api_key')")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdoCfg = null;
 
     // Proveedor y modelo: congelados en la tarea si existen, si no usar la config actual
@@ -277,31 +277,82 @@ function doTrans(int $taskId, string $payloadJson): void {
     $primaryModel = $pl['model'] ?? ($cfgRows['translation_model'] ?? '');
     $systemPrompt = $cfgRows['system_prompt'] ?? DEEPSEEK_SYSTEM_PROMPT;
 
-    // Construir lista de candidatos: principal primero, luego fallbacks configurados
-    $fallbackList = array_values(array_filter(array_map('trim', explode(',', $cfgRows['translation_fallback_providers'] ?? ''))));
-    $orderedKeys = array_values(array_unique(array_merge([$primaryKey], $fallbackList)));
+    // Construir lista de candidatos: principal primero, luego fallbacks.
+    // Si hay modelos de respaldo explícitos (proveedor/modelo), se usan tal cual.
+    // Si no, se usa el comportamiento legacy por proveedor con selección automática.
+    $fallbackModels = [];
+    $rawFbModels = $cfgRows['translation_fallback_models'] ?? '';
+    if ($rawFbModels !== '') {
+        $dec = json_decode($rawFbModels, true);
+        if (is_array($dec)) {
+            foreach ($dec as $f) {
+                $p = strtolower(trim($f['provider'] ?? ''));
+                $m = trim($f['model'] ?? '');
+                if ($p === '' || $m === '') continue;
+                $fallbackModels[] = ['key' => $p, 'model' => $m];
+            }
+        }
+    }
+
+    $fallbackList = []; // [ ['key'=>, 'model'=>] ]
+    if (!empty($fallbackModels)) {
+        $fallbackList = $fallbackModels;
+    } else {
+        foreach (explode(',', $cfgRows['translation_fallback_providers'] ?? '') as $k) {
+            $k = trim($k);
+            if ($k === '') continue;
+            $fallbackList[] = ['key' => $k, 'model' => ''];
+        }
+    }
 
     $candidates = []; // [ ['key'=>, 'provider'=>obj, 'model'=>] ]
-    foreach ($orderedKeys as $k) {
-        $keySetting = $k . '_api_key';
-        $apiKey = $cfgRows[$keySetting] ?? '';
+
+    // Helper para resolver el modelo cuando viene vacío (auto-selección).
+    $resolveModel = function ($provider, $m) {
+        if ($m !== '') return $m;
+        try {
+            $available = $provider->listModels();
+            foreach ($available as $mm) { if (!empty($mm['is_recommended'])) return $mm['id']; }
+            return $available[0]['id'] ?? '';
+        } catch (Exception $e) {
+            throw $e;
+        }
+    };
+
+    // 1) Proveedor principal (congelado en la tarea o actual)
+    $primaryApiKey = $cfgRows[$primaryKey . '_api_key'] ?? '';
+    if (!empty($primaryApiKey) && isEncrypted($primaryApiKey)) $primaryApiKey = decryptValue($primaryApiKey);
+    if (!empty($primaryApiKey)) {
+        $provider = TranslationProviderFactory::create($primaryKey, $primaryApiKey);
+        if ($provider) {
+            try {
+                $m = $resolveModel($provider, $primaryModel);
+                if ($m !== '') {
+                    $candidates[] = ['key' => $primaryKey, 'provider' => $provider, 'model' => $m];
+                }
+            } catch (Exception $e) {
+                workerLog("  [$primaryKey] no se pudo listar modelos: ".$e->getMessage());
+            }
+        }
+    }
+
+    // 2) Fallbacks en el orden configurado
+    foreach ($fallbackList as $f) {
+        $k = $f['key'];
+        // No repetir el modelo principal exacto (mismo proveedor y modelo).
+        if ($k === $primaryKey && $f['model'] === $primaryModel) continue;
+        $apiKey = $cfgRows[$k . '_api_key'] ?? '';
         if (!empty($apiKey) && isEncrypted($apiKey)) $apiKey = decryptValue($apiKey);
         if (empty($apiKey)) continue;
 
         $provider = TranslationProviderFactory::create($k, $apiKey);
         if (!$provider) continue;
 
-        // Modelo: el de la tarea si es el proveedor principal; si no, auto-seleccionar
-        $m = ($k === $primaryKey && $primaryModel !== '') ? $primaryModel : '';
-        if ($m === '') {
-            try {
-                $available = $provider->listModels();
-                foreach ($available as $mm) { if (!empty($mm['is_recommended'])) { $m = $mm['id']; break; } }
-                if ($m === '') $m = $available[0]['id'] ?? '';
-            } catch (Exception $e) {
-                workerLog("  [$k] no se pudo listar modelos: ".$e->getMessage());
-                continue;
-            }
+        try {
+            $m = $resolveModel($provider, $f['model']);
+        } catch (Exception $e) {
+            workerLog("  [$k] no se pudo listar modelos: ".$e->getMessage());
+            continue;
         }
         if ($m === '') continue;
 
