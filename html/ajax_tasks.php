@@ -46,6 +46,21 @@ switch ($action) {
                     $episode = (int)($pl['episode'] ?? 0);
                     $seriesId = $pl['series_id'] ?? '';
                     $mediaId = $pl['media_id'] ?? '';
+                    $jobId = $pl['job_id'] ?? '';
+
+                    // Progreso real de la traducción (partes completadas)
+                    $t['progress'] = null;
+                    if ($jobId !== '' && in_array($t['status'], ['pending', 'running'], true)) {
+                        $pj = $pdo->prepare("SELECT total_chunks, completed_chunks FROM translation_jobs WHERE job_id=?");
+                        $pj->execute([$jobId]);
+                        $jr = $pj->fetch(PDO::FETCH_ASSOC);
+                        if ($jr) {
+                            $t['progress'] = [
+                                'completed_chunks' => (int)$jr['completed_chunks'],
+                                'total_chunks'     => (int)$jr['total_chunks'],
+                            ];
+                        }
+                    }
 
                     // Intentar obtener el título de la serie desde la BD
                     if (!empty($seriesId)) {

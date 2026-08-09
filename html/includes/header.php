@@ -197,7 +197,14 @@ requireLogin();
 const POLL_INTERVAL = 15000; // 15 segundos
 let taskPanelLoaded = false;
 
-function formatTaskStatus(status) {
+function formatTaskStatus(status, progress) {
+    // Para traducciones activas con progreso conocido, mostrar "N / M partes"
+    if (progress && progress.total_chunks > 0 && (status === 'running' || status === 'pending')) {
+        if (status === 'running') {
+            return `<span class="badge bg-info badge-running"><i class="fa fa-refresh fa-spin me-1"></i>${progress.completed_chunks} / ${progress.total_chunks} partes</span>`;
+        }
+        return `<span class="badge bg-secondary"><i class="fa fa-clock-o me-1"></i>En cola</span>`;
+    }
     const map = {
         'pending':  '<span class="badge bg-secondary">Pendiente</span>',
         'running':  '<span class="badge bg-info badge-running">Ejecutando</span>',
@@ -205,6 +212,12 @@ function formatTaskStatus(status) {
         'error':    '<span class="badge bg-danger">Error</span>'
     };
     return map[status] || `<span class="badge bg-secondary">${status}</span>`;
+}
+
+function progressBarHtml(progress) {
+    if (!progress || progress.total_chunks <= 0) return '';
+    const pct = Math.min(100, Math.round((progress.completed_chunks / progress.total_chunks) * 100));
+    return `<div class="progress mt-1" style="height:4px;width:120px;"><div class="progress-bar bg-info" style="width:${pct}%"></div></div>`;
 }
 
 function formatTaskType(type) {
@@ -236,8 +249,9 @@ function renderTaskPanel(data) {
             html += `<div class="task-row">
                 <div class="d-flex justify-content-between align-items-start">
                     <span class="small">${formatTaskType(t.type)}</span>
-                    ${formatTaskStatus(t.status)}
+                    ${formatTaskStatus(t.status, t.progress)}
                 </div>
+                ${t.progress && t.status === 'running' ? progressBarHtml(t.progress) : ''}
                 ${t.result ? `<div class="text-muted" style="font-size:0.72rem;margin-top:2px">${t.result}</div>` : ''}
                 <div class="text-muted" style="font-size:0.68rem;margin-top:2px">${timeAgo(t.created_at)}</div>
             </div>`;
@@ -323,5 +337,13 @@ document.addEventListener('show.bs.offcanvas', function(e) {
 // Polling periódico del contador
 pollTasks();
 setInterval(pollTasks, POLL_INTERVAL);
+
+// Recargar el contenido del panel mientras esté abierto (para ver el avance)
+setInterval(() => {
+    const panel = document.getElementById('taskPanel');
+    if (panel && panel.classList.contains('show')) {
+        loadTaskPanel();
+    }
+}, POLL_INTERVAL);
 </script>
 
