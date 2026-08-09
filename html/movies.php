@@ -62,7 +62,6 @@ $lastUpdate = $pdo->query("
                             $year = htmlspecialchars($movie['year']);
                             $poster  = $movie['poster_url'] ?: 'https://via.placeholder.com/150x225?text=No+Poster';
                             $overview = htmlspecialchars($movie['overview'] ?? '');
-                            $tmdbId = htmlspecialchars($movie['tmdb_id'] ?? '');
                             $mediaId = $movie['id'];
                         ?>
                         <tr style="cursor: pointer;" onclick="window.location.href='subtitles.php?type=movies&id=<?= $mediaId ?>'" class="table-row-hover movie-row" data-title="<?= strtolower($title) ?>">
@@ -77,11 +76,6 @@ $lastUpdate = $pdo->query("
                                 <?php endif; ?>
                             </td>
                             <td class="text-end pe-4 text-muted" style="vertical-align:middle;">
-                                <?php if ($tmdbId): ?>
-                                    <a href="https://www.themoviedb.org/movie/<?= urlencode($tmdbId) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TMDB" class="btn btn-sm btn-outline-info me-2" onclick="event.stopPropagation();" style="text-decoration:none;">
-                                        <i class="fa fa-external-link me-1"></i>TMDB
-                                    </a>
-                                <?php endif; ?>
                                 <i class="fa fa-chevron-right"></i>
                             </td>
                         </tr>

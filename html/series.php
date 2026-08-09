@@ -62,7 +62,6 @@ $lastUpdate = $pdo->query("
                             $year = htmlspecialchars($s['year']);
                             $poster = $s['poster_url'] ?: 'https://via.placeholder.com/150x225?text=No+Poster';
                             $overview = htmlspecialchars($s['overview'] ?? '');
-                            $tvdbId = htmlspecialchars($s['tvdb_id'] ?? '');
                             $mediaId = $s['id'];
                         ?>
                         <tr style="cursor: pointer;" onclick="window.location.href='subtitles.php?type=series&id=<?= $mediaId ?>'" class="table-row-hover series-row" data-title="<?= strtolower($title) ?>">
@@ -77,11 +76,6 @@ $lastUpdate = $pdo->query("
                                 <?php endif; ?>
                             </td>
                             <td class="text-end pe-4 text-muted" style="vertical-align:middle;">
-                                <?php if ($tvdbId): ?>
-                                    <a href="https://thetvdb.com/series/<?= urlencode($tvdbId) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TheTVDB" class="btn btn-sm btn-outline-info me-2" onclick="event.stopPropagation();" style="text-decoration:none;">
-                                        <i class="fa fa-external-link me-1"></i>TheTVDB
-                                    </a>
-                                <?php endif; ?>
                                 <i class="fa fa-chevron-right"></i>
                             </td>
                         </tr>
