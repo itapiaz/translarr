@@ -57,8 +57,7 @@ $overview = $itemData['overview'] ?? 'Sin descripción disponible. Por favor, ej
 $folderPath = $itemData['folder_path'] ?? 'Ruta no disponible. Por favor, realiza un escaneo.';
 $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
 ?>
-<div class="d-flex justify-content-between align-items-center mb-2">
-    <h2 class="mb-0 text-muted"><i class="fa fa-closed-captioning text-primary me-2"></i> Gestión de Subtítulos</h2>
+<div class="d-flex justify-content-end mb-2">
     <a href="javascript:history.back()" class="btn btn-outline-light btn-sm"><i class="fa fa-arrow-left"></i> Volver</a>
 </div>
 <input type="hidden" id="monitor-csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
