@@ -31,7 +31,6 @@ $lastUpdate = $pdo->query("
         <span class="badge bg-secondary" id="series-count"><?= count($series) ?> Encontradas</span>
     </div>
 </div>
-<input type="hidden" id="monitor-csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
 
 <div class="mb-4">
     <div class="input-group">
@@ -89,15 +88,6 @@ $lastUpdate = $pdo->query("
                                 <?php endif; ?>
                             </td>
                             <td class="text-end pe-4 text-muted" style="vertical-align:middle;">
-                                <?php if ((int)$s['is_ignored'] === 1): ?>
-                                    <button type="button" class="btn btn-sm btn-outline-success me-2" onclick="event.stopPropagation();toggleMonitorList('series', <?= $mediaId ?>, 'monitor')">
-                                        <i class="fa fa-play me-1"></i>Volver a monitorizar
-                                    </button>
-                                <?php else: ?>
-                                    <button type="button" class="btn btn-sm btn-outline-danger me-2" onclick="event.stopPropagation();toggleMonitorList('series', <?= $mediaId ?>, 'ignore')">
-                                        <i class="fa fa-ban me-1"></i>No monitorizar
-                                    </button>
-                                <?php endif; ?>
                                 <i class="fa fa-chevron-right"></i>
                             </td>
                         </tr>
@@ -116,32 +106,6 @@ $lastUpdate = $pdo->query("
 </div>
 
 <?php require_once 'includes/footer.php'; ?>
-
-<script>
-function toggleMonitorList(type, id, action) {
-    const csrf = document.getElementById('monitor-csrf')?.value || '';
-    const msgs = {
-        ignore: '¿Dejar de monitorizar este elemento?',
-        monitor: '¿Volver a monitorizar este elemento?'
-    };
-    if (!confirm(msgs[action] || '')) return;
-    fetch('ajax_monitor.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ action: action, type: type, id: id, _csrf_token: csrf })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'success') {
-            alert(data.message);
-            window.location.reload();
-        } else {
-            alert('Error: ' + (data.message || 'desconocido'));
-        }
-    })
-    .catch(() => alert('Error de conexión.'));
-}
-</script>
 
 <script>
 function filterSeries(query) {
