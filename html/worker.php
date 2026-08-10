@@ -146,7 +146,7 @@ function doScanMedia(): string {
 
             // Upsert de episodios (autocommit)
             $pdo = freshPDO();
-            $upsertEp = $pdo->prepare("INSERT INTO episodes (series_id, sonarr_episode_id, tvdb_episode_id, title, season, episode, video_path, has_file, has_spanish, updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(sonarr_episode_id) DO UPDATE SET series_id=excluded.series_id,title=excluded.title,season=excluded.season,episode=excluded.episode,tvdb_episode_id=excluded.tvdb_episode_id,video_path=excluded.video_path,has_file=excluded.has_file,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
+            $upsertEp = $pdo->prepare("INSERT INTO episodes (series_id, sonarr_episode_id, tvdb_episode_id, title, season, episode, video_path, has_file, has_spanish, has_english, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(sonarr_episode_id) DO UPDATE SET series_id=excluded.series_id,title=excluded.title,season=excluded.season,episode=excluded.episode,tvdb_episode_id=excluded.tvdb_episode_id,video_path=excluded.video_path,has_file=excluded.has_file,has_spanish=excluded.has_spanish,has_english=excluded.has_english,updated_at=CURRENT_TIMESTAMP");
             foreach ($seriesList as $s) {
                 $seriesDbId = $seriesIdMap[$s['id']] ?? null;
                 if (!$seriesDbId) continue;
@@ -164,10 +164,13 @@ function doScanMedia(): string {
                     foreach ($eps as $ep) {
                         $videoPath = isset($fileById[$ep['episodeFileId']]) ? $fileById[$ep['episodeFileId']] : '';
                         $hasSpanish = 0;
+                        $hasEnglish = 0;
                         if ($videoPath && is_file($videoPath)) {
-                            $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
+                            $subs = SubtitleScanner::findSubtitlesForVideo($videoPath);
+                            $hasSpanish = SubtitleScanner::hasSpanish($subs) ? 1 : 0;
+                            $hasEnglish = SubtitleScanner::englishSubtitle($subs) ? 1 : 0;
                         }
-                        $upsertEp->execute([$seriesDbId, (int)$ep['id'], $ep['tvdbEpisodeId'] !== '' ? (int)$ep['tvdbEpisodeId'] : null, $ep['title'], (int)$ep['season'], (int)$ep['episode'], $videoPath, $ep['hasFile'] ? 1 : 0, $hasSpanish]);
+                        $upsertEp->execute([$seriesDbId, (int)$ep['id'], $ep['tvdbEpisodeId'] !== '' ? (int)$ep['tvdbEpisodeId'] : null, $ep['title'], (int)$ep['season'], (int)$ep['episode'], $videoPath, $ep['hasFile'] ? 1 : 0, $hasSpanish, $hasEnglish]);
                         $stats['episodes']++;
                     }
                     $scanned['episodes'] = true;
@@ -195,7 +198,7 @@ function doScanMedia(): string {
             $movies = $radarr->getMovies();
 
             $pdo = freshPDO();
-            $upsertMovie = $pdo->prepare("INSERT INTO movies (radarr_id, tmdb_id, title, year, overview, poster_url, folder_path, video_path, has_file, has_spanish, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(radarr_id) DO UPDATE SET tmdb_id=excluded.tmdb_id,title=excluded.title,year=excluded.year,overview=excluded.overview,poster_url=excluded.poster_url,folder_path=excluded.folder_path,video_path=excluded.video_path,has_file=excluded.has_file,has_spanish=excluded.has_spanish,updated_at=CURRENT_TIMESTAMP");
+            $upsertMovie = $pdo->prepare("INSERT INTO movies (radarr_id, tmdb_id, title, year, overview, poster_url, folder_path, video_path, has_file, has_spanish, has_english, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(radarr_id) DO UPDATE SET tmdb_id=excluded.tmdb_id,title=excluded.title,year=excluded.year,overview=excluded.overview,poster_url=excluded.poster_url,folder_path=excluded.folder_path,video_path=excluded.video_path,has_file=excluded.has_file,has_spanish=excluded.has_spanish,has_english=excluded.has_english,updated_at=CURRENT_TIMESTAMP");
 
             foreach ($movies as $m) {
                 $videoPath = '';
@@ -223,10 +226,13 @@ function doScanMedia(): string {
                     $videoPath = SubtitleScanner::findVideoInFolder($m['path'] ?? '');
                 }
                 $hasSpanish = 0;
+                $hasEnglish = 0;
                 if ($videoPath && is_file($videoPath)) {
-                    $hasSpanish = SubtitleScanner::hasSpanish(SubtitleScanner::findSubtitlesForVideo($videoPath)) ? 1 : 0;
+                    $subs = SubtitleScanner::findSubtitlesForVideo($videoPath);
+                    $hasSpanish = SubtitleScanner::hasSpanish($subs) ? 1 : 0;
+                    $hasEnglish = SubtitleScanner::englishSubtitle($subs) ? 1 : 0;
                 }
-                $upsertMovie->execute([(int)$m['id'], $m['tmdbId'] !== '' ? (int)$m['tmdbId'] : null, $m['title'], $m['year'], $m['overview'], $m['poster'], $m['path'], $videoPath, $m['hasFile'] ? 1 : 0, $hasSpanish]);
+                $upsertMovie->execute([(int)$m['id'], $m['tmdbId'] !== '' ? (int)$m['tmdbId'] : null, $m['title'], $m['year'], $m['overview'], $m['poster'], $m['path'], $videoPath, $m['hasFile'] ? 1 : 0, $hasSpanish, $hasEnglish]);
                 $stats['movies']++;
             }
             $pdo = null;
@@ -258,6 +264,98 @@ function doScanMedia(): string {
     $r = "{$stats['movies']} movies, {$stats['series']} series, {$stats['episodes']} eps.";
     workerLog("OK. $r");
     return $r;
+}
+function autoEnqueueTranslations(): int {
+    // Traducción automática tras cada escaneo: encola contenido con subtítulo EN
+    // pero sin ES, no monitorizado ni ya en cola, respetando un límite por lote.
+    $pdo = freshPDO();
+    $enabled = (string)($pdo->query("SELECT setting_value FROM settings WHERE setting_key='auto_translate_enabled'")->fetchColumn() ?: '0');
+    $batch = max(1, (int)($pdo->query("SELECT setting_value FROM settings WHERE setting_key='auto_translate_batch_size'")->fetchColumn() ?: 5));
+    if ($enabled !== '1') {
+        workerLog("Auto-traducción desactivada. Omitida.");
+        $pdo = null;
+        return 0;
+    }
+
+    // Candidatos: películas y episodios con EN pero sin ES, no ignorados y con archivo.
+    $candidates = [];
+    $movies = $pdo->query("SELECT id, title, video_path FROM movies WHERE has_file=1 AND has_english=1 AND has_spanish=0 AND is_ignored=0")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($movies as $m) {
+        $candidates[] = ['type' => 'movie', 'media_id' => (int)$m['id'], 'series_id' => 0, 'season' => 0, 'episode' => 0, 'title' => $m['title'], 'video_path' => $m['video_path']];
+    }
+    $eps = $pdo->query("SELECT e.id, e.title, e.video_path, e.season, e.episode, e.series_id FROM episodes e JOIN series s ON s.id = e.series_id WHERE e.has_file=1 AND e.has_english=1 AND e.has_spanish=0 AND s.is_ignored=0")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($eps as $e) {
+        $candidates[] = ['type' => 'episode', 'media_id' => (int)$e['id'], 'series_id' => (int)$e['series_id'], 'season' => (int)$e['season'], 'episode' => (int)$e['episode'], 'title' => $e['title'], 'video_path' => $e['video_path']];
+    }
+    $pdo = null;
+    if (empty($candidates)) {
+        workerLog("Auto-traducción: sin candidatos.");
+        return 0;
+    }
+
+    // Excluir elementos que ya tengan una traducción pendiente o ejecutándose.
+    $pdo = freshPDO();
+    $busy = [];
+    foreach ($pdo->query("SELECT media_id, media_type, status FROM translation_log WHERE status IN ('pending','running')")->fetchAll(PDO::FETCH_ASSOC) as $b) {
+        $busy[$b['media_type'] . ':' . $b['media_id']] = true;
+    }
+    $pdo = null;
+    $encolados = 0;
+    $sinIngles = 0;
+    $yaEs = 0;
+    $toQueue = [];
+    foreach ($candidates as $c) {
+        $key = $c['type'] . ':' . $c['media_id'];
+        if (isset($busy[$key])) continue; // ya en cola o traduciéndose
+
+        // Revalidar en disco: debe existir EN y no debe existir ES
+        $subtitles = [];
+        if ($c['video_path'] && is_file($c['video_path'])) {
+            $subtitles = SubtitleScanner::findSubtitlesForVideo($c['video_path']);
+        }
+        $englishSub = SubtitleScanner::englishSubtitle($subtitles);
+        if (!$englishSub || empty($englishSub['path']) || !file_exists($englishSub['path'])) { $sinIngles++; continue; }
+        if (SubtitleScanner::hasSpanish($subtitles)) { $yaEs++; continue; }
+
+        $toQueue[] = [
+            'type' => $c['type'], 'mediaId' => $c['media_id'], 'path' => $englishSub['path'],
+            'seriesId' => $c['series_id'], 'season' => $c['season'], 'episode' => $c['episode'], 'title' => $c['title'],
+        ];
+        if (count($toQueue) >= $batch) break;
+    }
+
+    if (!empty($toQueue)) {
+        $pdo = freshPDO();
+        try {
+            $pdo->exec("DELETE FROM translation_jobs WHERE created_at < datetime('now', '-2 hours')");
+            $stmtJob = $pdo->prepare("INSERT INTO translation_jobs (job_id, chunks, results, path, type, media_id, series_id) VALUES (?, '[]', '[]', ?, ?, ?, ?)");
+            $stmtLog = $pdo->prepare("INSERT INTO translation_log (media_id, media_title, media_type, series_id, season, episode, subtitle_path, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')");
+            $stmtBg  = $pdo->prepare("INSERT INTO background_tasks (type, status, payload, created_at) VALUES ('translate', 'pending', ?, CURRENT_TIMESTAMP)");
+            $pdo->beginTransaction();
+            foreach ($toQueue as $item) {
+                $jobId = bin2hex(random_bytes(16));
+                $stmtJob->execute([$jobId, $item['path'], $item['type'], $item['mediaId'], $item['seriesId']]);
+                $stmtLog->execute([$item['mediaId'], $item['title'], $item['type'], $item['seriesId'], $item['season'], $item['episode'], $item['path']]);
+                $logId = $pdo->lastInsertId();
+                $payload = json_encode([
+                    'job_id' => $jobId, 'log_id' => (int)$logId, 'path' => $item['path'], 'type' => $item['type'],
+                    'media_id' => $item['mediaId'], 'series_id' => $item['seriesId'], 'media_title' => $item['title'],
+                    'season' => $item['season'], 'episode' => $item['episode'], 'total_chunks' => 0,
+                ]);
+                $stmtBg->execute([$payload]);
+                $encolados++;
+            }
+            $pdo->commit();
+            $pdo = null;
+        } catch (Exception $e) {
+            if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
+            $pdo = null;
+            workerLog("Error auto-encolando: " . $e->getMessage());
+        }
+    }
+
+    workerLog("Auto-traducción: encolados=$encolados, sin_ingles=$sinIngles, ya_es=$yaEs (lote máx $batch).");
+    return $encolados;
 }
 function doTrans(int $taskId, string $payloadJson): void {
     $pl = json_decode($payloadJson, true);
@@ -581,8 +679,9 @@ while (true) {
         @unlink($triggerFile);
         $r = doScanMedia();
         $lastScanTime = time();
+        $autoN = autoEnqueueTranslations();
         $p2 = freshPDO();
-        $p2->prepare("INSERT INTO background_tasks(type,status,result,created_at,finished_at) VALUES('scan_media','done',?,datetime('now'),datetime('now'))")->execute([$r]);
+        $p2->prepare("INSERT INTO background_tasks(type,status,result,created_at,finished_at) VALUES('scan_media','done',?,datetime('now'),datetime('now'))")->execute([$r . ' | autoencolados: ' . $autoN]);
         $p2 = null;
     }
     
@@ -602,8 +701,9 @@ while (true) {
     if ($lastScanTime > 0 && (time() - $lastScanTime) >= $si) {
         $r = doScanMedia();
         $lastScanTime = time();
+        $autoN = autoEnqueueTranslations();
         $p2 = freshPDO();
-        $p2->prepare("INSERT INTO background_tasks(type,status,result,created_at,finished_at) VALUES('scan_media','done',?,datetime('now'),datetime('now'))")->execute([$r]);
+        $p2->prepare("INSERT INTO background_tasks(type,status,result,created_at,finished_at) VALUES('scan_media','done',?,datetime('now'),datetime('now'))")->execute([$r . ' | autoencolados: ' . $autoN]);
         $p2 = null;
     }
     

@@ -126,6 +126,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute(['translation_fallback_providers', '']);
             $stmt->execute(['system_prompt', $systemPrompt]);
             $stmt->execute(['chunk_size', $chunkSize]);
+            $autoTranslateEnabled = (($_POST['auto_translate_enabled'] ?? '0') === '1') ? '1' : '0';
+            $autoTranslateBatch = max(1, min(200, (int)($_POST['auto_translate_batch_size'] ?? 5)));
+            $stmt->execute(['auto_translate_enabled', $autoTranslateEnabled]);
+            $stmt->execute(['auto_translate_batch_size', (string)$autoTranslateBatch]);
             $pdo->commit();
             $message = "Configuración de IA guardada correctamente.";
             $status = "success";
@@ -183,6 +187,8 @@ $currentPathMappingSeriesFrom = $currentSettings['path_mapping_series_from'] ?? 
 $currentPathMappingSeriesTo = $currentSettings['path_mapping_series_to'] ?? '';
 $currentAutoScan = $currentSettings['auto_scan_enabled'] ?? '1';
 $currentScanInterval = $currentSettings['scan_interval_minutes'] ?? '60';
+$currentAutoTranslate = $currentSettings['auto_translate_enabled'] ?? '0';
+$currentAutoTranslateBatch = $currentSettings['auto_translate_batch_size'] ?? '5';
 
 // Modelos registrados de IA (caché SQLite) y etiquetas de proveedor
 require_once 'includes/TranslationProviderFactory.php';
@@ -442,6 +448,22 @@ foreach ($providerLabels as $pk => $pl) {
                                 <input type="number" class="form-control" id="chunk_size" name="chunk_size"
                                        value="<?= htmlspecialchars($currentChunkSize) ?>" min="10" max="500">
                                 <div class="form-text text-muted">Recomendado entre 50 y 100 para evitar timeouts.</div>
+                            </div>
+
+                            <hr class="border-secondary">
+                            <h5 class="text-info mb-3"><i class="fa fa-magic me-2"></i> Traducción automática</h5>
+
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="auto_translate_enabled" name="auto_translate_enabled" value="1" <?= $currentAutoTranslate === '1' ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="auto_translate_enabled">Activar traducción automática tras cada escaneo</label>
+                                <div class="form-text text-muted">Tras actualizar el catálogo, encola automáticamente películas y episodios que tienen subtítulo en inglés pero no en español, y que no están marcados como "No monitorizar".</div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="auto_translate_batch_size" class="form-label">Máximo de traducciones por escaneo</label>
+                                <input type="number" class="form-control" id="auto_translate_batch_size" name="auto_translate_batch_size"
+                                       value="<?= htmlspecialchars($currentAutoTranslateBatch) ?>" min="1" max="200">
+                                <div class="form-text text-muted">Límite por ciclo para no saturar la cola. Sube el valor cuando quieras procesar el backlog más rápido.</div>
                             </div>
 
                         </div>

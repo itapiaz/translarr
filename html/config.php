@@ -67,6 +67,7 @@ try {
         video_path TEXT,
         has_file INTEGER DEFAULT 0,
         has_spanish INTEGER DEFAULT 0,
+        has_english INTEGER DEFAULT 0,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
     $pdo->exec("CREATE TABLE IF NOT EXISTS series (
@@ -90,6 +91,7 @@ try {
         episode INTEGER DEFAULT 0,
         video_path TEXT,
         has_file INTEGER DEFAULT 0,
+        has_english INTEGER DEFAULT 0,
         has_spanish INTEGER DEFAULT 0,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
@@ -133,6 +135,15 @@ try {
     try {
         $pdo->exec("ALTER TABLE series ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0");
     } catch (Exception $e) {
+    // Migración: detección de subtítulo en inglés (para traducción automática)
+    try {
+        $pdo->exec("ALTER TABLE movies ADD COLUMN has_english INTEGER NOT NULL DEFAULT 0");
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE episodes ADD COLUMN has_english INTEGER NOT NULL DEFAULT 0");
+    } catch (Exception $e) {
+    }
     }
 
     // Migración: progreso de traducción por chunk en translation_jobs
@@ -228,6 +239,8 @@ try {
             ('path_mapping_series_from', ''),
             ('path_mapping_series_to', ''),
             ('auto_scan_enabled', '1'),
+            ('auto_translate_enabled', '0'),
+            ('auto_translate_batch_size', '5'),
             ('scan_interval_minutes', '60')");
     }
 
@@ -311,6 +324,8 @@ try {
         'chunk_size' => '50',
         'auto_scan_enabled' => '1',
         'scan_interval_minutes' => '60',
+        'auto_translate_enabled' => '0',
+        'auto_translate_batch_size' => '5',
     ];
     foreach ($defaultSettings as $key => $default) {
         if (!isset($settings[$key])) {
