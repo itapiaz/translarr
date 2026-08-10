@@ -267,23 +267,27 @@ function doScanMedia(): string {
 }
 function autoEnqueueTranslations(): int {
     // Traducción automática tras cada escaneo: encola contenido con subtítulo EN
-    // pero sin ES, no monitorizado ni ya en cola, respetando un límite por lote.
+    // pero sin ES, que tenga activada su propia traducción automática (película o serie),
+    // no esté monitorizado ni ya en cola, respetando un límite por lote.
     $pdo = freshPDO();
-    $enabled = (string)($pdo->query("SELECT setting_value FROM settings WHERE setting_key='auto_translate_enabled'")->fetchColumn() ?: '0');
     $batch = max(1, (int)($pdo->query("SELECT setting_value FROM settings WHERE setting_key='auto_translate_batch_size'")->fetchColumn() ?: 5));
-    if ($enabled !== '1') {
-        workerLog("Auto-traducción desactivada. Omitida.");
-        $pdo = null;
-        return 0;
-    }
 
-    // Candidatos: películas y episodios con EN pero sin ES, no ignorados y con archivo.
+    // Candidatos: películas con auto_translate y episodios de series con auto_translate.
     $candidates = [];
-    $movies = $pdo->query("SELECT id, title, video_path FROM movies WHERE has_file=1 AND has_english=1 AND has_spanish=0 AND is_ignored=0")->fetchAll(PDO::FETCH_ASSOC);
+    $movies = $pdo->query(
+        "SELECT id, title, video_path FROM movies
+         WHERE auto_translate=1 AND has_file=1 AND has_english=1 AND has_spanish=0 AND is_ignored=0"
+    )->fetchAll(PDO::FETCH_ASSOC);
     foreach ($movies as $m) {
         $candidates[] = ['type' => 'movie', 'media_id' => (int)$m['id'], 'series_id' => 0, 'season' => 0, 'episode' => 0, 'title' => $m['title'], 'video_path' => $m['video_path']];
     }
-    $eps = $pdo->query("SELECT e.id, e.title, e.video_path, e.season, e.episode, e.series_id FROM episodes e JOIN series s ON s.id = e.series_id WHERE e.has_file=1 AND e.has_english=1 AND e.has_spanish=0 AND s.is_ignored=0")->fetchAll(PDO::FETCH_ASSOC);
+    $eps = $pdo->query(
+        "SELECT e.id, e.title, e.video_path, e.season, e.episode, e.series_id
+         FROM episodes e
+         JOIN series s ON s.id = e.series_id
+         WHERE s.auto_translate=1 AND s.is_ignored=0
+           AND e.has_file=1 AND e.has_english=1 AND e.has_spanish=0"
+    )->fetchAll(PDO::FETCH_ASSOC);
     foreach ($eps as $e) {
         $candidates[] = ['type' => 'episode', 'media_id' => (int)$e['id'], 'series_id' => (int)$e['series_id'], 'season' => (int)$e['season'], 'episode' => (int)$e['episode'], 'title' => $e['title'], 'video_path' => $e['video_path']];
     }

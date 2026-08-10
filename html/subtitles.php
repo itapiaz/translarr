@@ -56,6 +56,7 @@ $year = $itemData['year'] ?? '';
 $overview = $itemData['overview'] ?? 'Sin descripción disponible. Por favor, ejecuta un Escaneo Manual de medios para obtener esta información.';
 $folderPath = $itemData['folder_path'] ?? 'Ruta no disponible. Por favor, realiza un escaneo.';
 $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
+$autoTranslate = (int)($itemData['auto_translate'] ?? 0) === 1;
 ?>
 <input type="hidden" id="monitor-csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
 
@@ -74,6 +75,15 @@ $isIgnored = (int)($itemData['is_ignored'] ?? 0) === 1;
     <?php else: ?>
         <button type="button" class="btn btn-sm btn-outline-danger" onclick="toggleMonitor('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'ignore')" title="No monitorizar">
             <i class="fa fa-ban me-1"></i> No monitorizar
+        </button>
+    <?php endif; ?>
+    <?php if ($autoTranslate): ?>
+        <button type="button" class="btn btn-sm btn-outline-success" onclick="toggleAutoTranslate('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'disable')" <?= $isIgnored ? 'disabled' : '' ?> title="Traducción automática activa. Pulsa para desactivarla.">
+            <i class="fa fa-magic me-1"></i> Traducción automática activa
+        </button>
+    <?php else: ?>
+        <button type="button" class="btn btn-sm btn-outline-warning" onclick="toggleAutoTranslate('<?= htmlspecialchars($type) ?>', <?= htmlspecialchars($id) ?>, 'enable')" <?= $isIgnored ? 'disabled' : '' ?> title="Traducir automáticamente este contenido cuando haya subtítulos en inglés pendientes">
+            <i class="fa fa-magic me-1"></i> Activar traducción automática
         </button>
     <?php endif; ?>
     <?php
@@ -448,6 +458,35 @@ async function toggleMonitor(type, id, action) {
 
     try {
         const res = await fetch('ajax_monitor.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ action: action, type: type, id: id, _csrf_token: csrf })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            alert(data.message);
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.message || 'desconocido'));
+        }
+    } catch (e) {
+        alert('Error de conexión: ' + e.message);
+    }
+    if (btn) btn.disabled = false;
+}
+
+// ===== Traducción automática (por contenido) =====
+async function toggleAutoTranslate(type, id, action) {
+    const verb = (action === 'enable') ? 'Activar' : 'Desactivar';
+    const title = document.querySelector('.fw-bold.text-white')?.textContent?.trim() || 'este contenido';
+    if (!confirm(verb + ' la traducción automática de "' + title + '"?\n\nSe traducirán automáticamente los subtítulos en inglés pendientes tras cada escaneo.')) return;
+
+    const csrf = document.getElementById('monitor-csrf')?.value || '';
+    const btn = event?.target?.closest('button');
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch('ajax_auto_translate.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ action: action, type: type, id: id, _csrf_token: csrf })
