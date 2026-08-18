@@ -52,6 +52,7 @@ jobs:
 
       - name: Sync README to Docker Hub overview
         uses: peter-evans/dockerhub-description@v4
+        continue-on-error: true  # cosmético: no debe tumbar el release si el token no permite actualizar la descripción
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
