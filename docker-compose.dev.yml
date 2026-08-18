@@ -1,0 +1,20 @@
+# docker-compose.dev.yml — DESARROLLO local
+# Construye la imagen local y monta el código fuente como volumen (hot reload).
+# Uso: docker compose -f docker-compose.dev.yml up -d
+services:
+  translarr:
+    build: .
+    image: translarr:dev
+    container_name: translarr
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=America/Lima
+    volumes:
+      - ./config:/config
+      - ./html:/app/www/public
+      - /home/media/movies:/movies
+      - /home/media/tvshows:/tv
+    ports:
+      - "4646:80"
+    restart: unless-stopped

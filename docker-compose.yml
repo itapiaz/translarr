@@ -1,15 +1,13 @@
+# docker-compose.yml — Para USUARIOS FINALES (usa la imagen publicada en Docker Hub)
+# Para desarrollo local usa: docker compose -f docker-compose.dev.yml up -d
 services:
   translarr:
-    build: .
-    image: translarr:latest
+    image: itapiaz/translarr:latest
     container_name: translarr
     environment:
-      - PUID=0
-      - PGID=0
       - TZ=America/Lima
     volumes:
       - ./config:/config
-      - ./html:/app/www/public
       - /home/media/movies:/movies
       - /home/media/tvshows:/tv
     ports:

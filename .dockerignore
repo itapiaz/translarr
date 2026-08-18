@@ -1,0 +1,31 @@
+# Git y CI
+.git/
+.github/
+
+# Datos de runtime y secretos — NUNCA dentro de la imagen
+# /config/ contiene la base SQLite con credenciales de API
+config/
+
+# Archivos temporales y de scratch
+html/scratch/
+*.log
+*.lock
+*.sqlite
+*.sqlite-*
+*.tmp
+*.swp
+*~
+
+# Documentación y archivos de desarrollo (no van en la imagen)
+plan.md
+README.md
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.dev.yml
+
+# Editor y sistema operativo
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

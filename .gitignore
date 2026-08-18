@@ -20,3 +20,6 @@ Thumbs.db
 *.tmp
 *.swp
 *~
+
+# Internal planning notes (not for the public repo)
+plan.md
