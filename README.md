@@ -28,6 +28,16 @@ docker run -d \
 
 Then open **http://localhost:4646**
 
+## First Login
+
+Sign in with the default credentials:
+
+| Username | Password |
+|---|---|
+| `admin` | `admin` |
+
+> ⚠️ **Change the password immediately** in *Configuración → Nueva Contraseña del Administrador*.
+
 ## Docker Compose
 
 ```yaml
