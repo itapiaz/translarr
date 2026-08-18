@@ -40,6 +40,26 @@ class RadarrAPI extends ArrClient {
     }
 
     /**
+     * Datos estandarizados de UNA película por su ID de Radarr:
+     * ['id', 'tmdbId', 'title', 'year', 'overview', 'path', 'poster', 'hasFile', 'movieFileId', 'movieFile']
+     */
+    public function getMovie($movieId): array {
+        $m = $this->request('/movie/' . (int)$movieId);
+        return [
+            'id' => $m['id'] ?? 0,
+            'tmdbId' => $m['tmdbId'] ?? '',
+            'title' => $m['title'] ?? 'Sin título',
+            'year' => $m['year'] ?? '',
+            'overview' => $m['overview'] ?? '',
+            'path' => $m['path'] ?? '',
+            'poster' => $this->extractImage($m['images'] ?? [], 'poster'),
+            'hasFile' => !empty($m['hasFile']),
+            'movieFileId' => $m['movieFileId'] ?? null,
+            'movieFile' => $m['movieFile'] ?? null,
+        ];
+    }
+
+    /**
      * Archivos de película filtrados por movieId (Radarr exige el filtro).
      * [['id', 'movieId', 'path', 'relativePath'], ...]
      */

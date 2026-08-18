@@ -86,12 +86,15 @@ $autoTranslate = (int)($itemData['auto_translate'] ?? 0) === 1;
             <i class="fa fa-magic me-1"></i> Activar traducción automática
         </button>
     <?php endif; ?>
+    <button type="button" id="scan-item-btn" class="btn btn-sm btn-outline-secondary" onclick="scanItem('<?= htmlspecialchars($type) ?>', <?= (int)$id ?>)" title="Actualizar desde Sonarr/Radarr y releer el disco (descubre contenido nuevo y subtítulos)">
+        <i class="fa fa-refresh me-1"></i> Escanear disco
+    </button>
     <?php
         $tvdbId = $itemData['tvdb_id'] ?? '';
         $tmdbId = $itemData['tmdb_id'] ?? '';
     ?>
     <?php if ($type === 'series' && $tvdbId): ?>
-        <a class="btn btn-sm btn-outline-info" href="https://thetvdb.com/series/<?= htmlspecialchars(urlencode($tvdbId)) ?>" target="_blank" rel="noopener noreferrer" title="Ver en TheTVDB">
+        <a class="btn btn-sm btn-outline-info" href="https://thetvdb.com/?id=<?= htmlspecialchars(urlencode($tvdbId)) ?>&tab=series" target="_blank" rel="noopener noreferrer" title="Ver en TheTVDB">
             <i class="fa fa-external-link me-1"></i> Ver en TheTVDB
         </a>
     <?php elseif ($type === 'movies' && $tmdbId): ?>
@@ -473,6 +476,31 @@ async function toggleMonitor(type, id, action) {
         alert('Error de conexión: ' + e.message);
     }
     if (btn) btn.disabled = false;
+}
+
+// ===== Escanear disco de este contenido =====
+async function scanItem(type, id) {
+    const csrf = document.getElementById('monitor-csrf')?.value || '';
+    const btn = document.getElementById('scan-item-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin me-1"></i> Escaneando...'; }
+
+    try {
+        const res = await fetch('ajax_scan_item.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ type: type, id: id, _csrf_token: csrf })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            alert(data.message);
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.message || 'desconocido'));
+        }
+    } catch (e) {
+        alert('Error de conexión: ' + e.message);
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa fa-refresh me-1"></i> Escanear disco'; }
 }
 
 // ===== Traducción automática (por contenido) =====

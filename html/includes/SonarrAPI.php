@@ -35,6 +35,23 @@ class SonarrAPI extends ArrClient {
     }
 
     /**
+     * Datos estandarizados de UNA serie por su ID de Sonarr:
+     * ['id', 'title', 'year', 'tvdbId', 'overview', 'path', 'poster']
+     */
+    public function getSeriesById($seriesId): array {
+        $s = $this->request('/series/' . (int)$seriesId);
+        return [
+            'id' => $s['id'] ?? 0,
+            'title' => $s['title'] ?? 'Sin título',
+            'year' => $s['year'] ?? '',
+            'tvdbId' => $s['tvdbId'] ?? '',
+            'overview' => $s['overview'] ?? '',
+            'path' => $s['path'] ?? '',
+            'poster' => $this->extractImage($s['images'] ?? [], 'poster'),
+        ];
+    }
+
+    /**
      * Lista estandarizada de episodios de una serie:
      * [['id', 'seriesId', 'title', 'season', 'episode', 'episodeFileId', 'tvdbEpisodeId'], ...]
      */
